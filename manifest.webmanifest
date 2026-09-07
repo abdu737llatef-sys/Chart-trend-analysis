@@ -1,0 +1,26 @@
+{
+  "name": "Chart Trend Analyzer",
+  "short_name": "Trend Analyzer",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#080d1b",
+  "theme_color": "#0b1020",
+  "lang": "ar",
+  "dir": "rtl",
+  "description": "تحليل اتجاه سوق العملات الرقمية على D1 وH1 وM15 باستخدام Trend Score.",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

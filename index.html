@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Trend Analyzer">
+  <title>Chart Trend Analyzer</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="wrap">
+    <header class="topbar">
+      <div>
+        <h1>Chart Trend Analyzer</h1>
+        <p>تحليل D1 / H1 / M15 من الهاتف</p>
+      </div>
+      <button id="installBtn" class="install hidden">تثبيت التطبيق</button>
+    </header>
+
+    <section class="card">
+      <h2>تحليل كريبتو مباشر</h2>
+      <div class="formgrid">
+        <label>
+          الرمز
+          <input id="symbol" value="BTCUSDT" inputmode="text" autocomplete="off" placeholder="BTCUSDT">
+        </label>
+        <label>
+          السوق
+          <select id="market">
+            <option value="spot">Binance Spot</option>
+            <option value="futures">Binance USD-M Futures</option>
+          </select>
+        </label>
+      </div>
+      <button id="analyzeBtn" class="primary">تحليل السوق</button>
+      <p class="muted">يتم جلب OHLCV العامة وحساب المؤشرات داخل الهاتف.</p>
+    </section>
+
+    <div id="status"></div>
+
+    <section id="masterCard" class="card hidden"></section>
+
+    <section id="workspace" class="hidden">
+      <div id="tabs" class="tabs"></div>
+
+      <section class="card">
+        <div class="charthead">
+          <div>
+            <h2 id="chartTitle">الشارت</h2>
+            <div id="chartMeta" class="muted"></div>
+          </div>
+          <div class="legend">
+            <span class="ema20">EMA20</span>
+            <span class="ema50">EMA50</span>
+            <span class="ema200">EMA200</span>
+            <span>HH/HL/LH/LL + BOS</span>
+          </div>
+        </div>
+        <div class="chartwrap">
+          <canvas id="chartCanvas"></canvas>
+          <div id="tooltip" class="tooltip hidden"></div>
+        </div>
+      </section>
+
+      <section class="grid2">
+        <section id="scorePanel" class="card"></section>
+        <section id="indicatorPanel" class="card"></section>
+      </section>
+    </section>
+
+    <section id="verifyCard" class="card hidden">
+      <h2>تحقق بصري اختياري عبر OpenAI</h2>
+      <p class="muted">يتطلب Backend خارجيًا آمنًا. لا يتم وضع مفتاح OpenAI داخل التطبيق.</p>
+      <label>
+        Backend URL
+        <input id="backendUrl" type="url" placeholder="https://your-server.example.com">
+      </label>
+      <div class="formgrid">
+        <label>
+          الفريم
+          <select id="verifyTf">
+            <option>D1</option>
+            <option>H1</option>
+            <option selected>M15</option>
+          </select>
+        </label>
+        <label>
+          صورة الشارت
+          <input id="verifyImg" type="file" accept="image/*">
+        </label>
+      </div>
+      <button id="verifyBtn" class="secondary">تحقق من الصورة</button>
+      <div id="verification"></div>
+    </section>
+
+    <section class="card">
+      <h2>الأوزان</h2>
+      <div class="chips">
+        <span>Structure 25</span>
+        <span>EMA Order 15</span>
+        <span>EMA Slope 10</span>
+        <span>RSI 10</span>
+        <span>ADX/DI 10</span>
+        <span>Volume 10</span>
+        <span>Support/Resistance 10</span>
+        <span>Break + Retest 10</span>
+      </div>
+      <p class="muted">Master: D1 = 35% • H1 = 40% • M15 = 25%. هذه درجة توافق فني تعليمية وليست توصية شراء أو بيع.</p>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
