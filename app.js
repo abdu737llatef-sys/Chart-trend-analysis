@@ -1,7 +1,10 @@
 const $=id=>document.getElementById(id);
 let deferredPrompt=null, mode='crypto', lastReport=null;
 
-if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./service-worker.js'));
+if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
+  const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.1.0',{updateViaCache:'none'});
+  await reg.update();
+}catch(e){console.warn('SW update failed',e);}});
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('installBtn').classList.remove('hidden');});
 $('installBtn').onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('installBtn').classList.add('hidden');};
 

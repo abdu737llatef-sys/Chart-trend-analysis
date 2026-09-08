@@ -1,3 +1,22 @@
+# Chart Trend Analyzer V5.1 — Cache Fix
+
+هذه نسخة V5 نفسها مع إصلاح قوي لتحديث PWA:
+- Network-first لـ index.html / app.js / style.css
+- Service Worker جديد
+- updateViaCache: none
+- أسماء أصول versioned لمنع V4/V5 القديمة من البقاء في الكاش
+
+## بعد رفعها إلى GitHub Pages
+1. استبدل جميع الملفات القديمة.
+2. Commit changes.
+3. افتح رابط GitHub Pages مع:
+   ?v=5.1
+   مثال:
+   https://USERNAME.github.io/REPO/?v=5.1
+4. تأكد أن العنوان أعلى التطبيق يظهر V5.1.
+5. إذا كان التطبيق المثبت لا يزال قديمًا:
+   احذفه من الشاشة الرئيسية، ثم امسح بيانات الموقع من Chrome وأعد تثبيته.
+
 # Chart Trend Analyzer V5 — Backtesting & Walk‑Forward
 
 ## الهدف

@@ -1,6 +1,6 @@
 {
-  "name": "Chart Trend Analyzer V5",
-  "short_name": "Trend V5",
+  "name": "Chart Trend Analyzer V5.1",
+  "short_name": "Trend V5.1",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
