@@ -3,29 +3,29 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#07111f">
+  <meta name="theme-color" content="#06111f">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>Chart Trend Analyzer V5.1</title>
-  <link rel="manifest" href="manifest.webmanifest?v=5.1.0">
+  <title>Chart Trend Analyzer V5.2</title>
+  <link rel="manifest" href="manifest.webmanifest?v=5.2.0">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="style.css?v=5.1.0">
+  <link rel="stylesheet" href="style.css?v=5.2.0">
 </head>
 <body>
 <main class="wrap">
   <header class="topbar">
     <div>
-      <h1>Chart Trend Analyzer <span>V5.1</span></h1>
-      <p>Backtesting • Walk‑Forward • Adaptive Weights</p>
+      <h1>Chart Trend Analyzer <span>V5.2</span></h1>
+      <p>Triple‑Barrier • Purged Walk‑Forward • MTF • Calibration</p>
     </div>
     <button id="installBtn" class="install hidden">تثبيت التطبيق</button>
   </header>
 
   <section class="card">
     <div class="mode-tabs">
-      <button class="modeTab active" data-mode="crypto">Crypto Backtest</button>
-      <button class="modeTab" data-mode="forex">Forex CSV Backtest</button>
+      <button class="modeTab active" data-mode="crypto">Crypto Research</button>
+      <button class="modeTab" data-mode="forex">Forex CSV Research</button>
     </div>
 
     <div id="cryptoControls">
@@ -37,28 +37,29 @@
             <option value="futures">Binance USD-M Futures</option>
           </select>
         </label>
-        <label>الفريم
+        <label>الفريم الأساسي
           <select id="timeframe">
             <option value="15m">15m</option>
             <option value="1h" selected>1h</option>
             <option value="1d">1d</option>
           </select>
         </label>
-        <label>عدد الشموع
+        <label>عدد شموع الفريم الأساسي
           <select id="historySize">
-            <option value="1000">1000</option>
+            <option value="1500">1500</option>
             <option value="2500" selected>2500</option>
             <option value="5000">5000</option>
             <option value="7500">7500</option>
           </select>
         </label>
       </div>
-      <button id="runCryptoBtn" class="primary">تشغيل Backtest + Walk‑Forward</button>
+      <button id="runCryptoBtn" class="primary">تشغيل V5.2 Research Test</button>
+      <p class="muted">يتم جلب الفريمات الأعلى وBTC/ETH تاريخيًا بصورة منفصلة عند الحاجة، مع استخدام الشموع الأعلى بعد إغلاقها فقط.</p>
     </div>
 
     <div id="forexControls" class="hidden">
       <div class="formgrid">
-        <label>اسم الزوج<input id="forexSymbol" value="EUR/USD"></label>
+        <label>الزوج<input id="forexSymbol" value="EUR/USD"></label>
         <label>الفريم
           <select id="forexTf">
             <option value="15m">15m</option>
@@ -67,42 +68,70 @@
           </select>
         </label>
       </div>
-      <label class="filelabel">ملف CSV تاريخي
-        <input id="forexCsv" type="file" accept=".csv,text/csv">
-      </label>
-      <button id="runForexBtn" class="primary">تشغيل Backtest على CSV</button>
-      <p class="muted">الأعمدة المطلوبة: Time, Open, High, Low, Close. ويفضل Volume.</p>
+      <label class="filelabel">CSV تاريخي<input id="forexCsv" type="file" accept=".csv,text/csv"></label>
+      <button id="runForexBtn" class="primary">تشغيل V5.2 على CSV</button>
+      <p class="muted">Forex CSV يستخدم MTF مشتقًا من نفس البيانات عند توفر تاريخ كافٍ. الأعمدة: Time/Open/High/Low/Close وVolume اختياري.</p>
     </div>
   </section>
 
   <section class="card">
-    <h2>إعدادات الاختبار</h2>
+    <h2>Triple‑Barrier & Validation</h2>
     <div class="formgrid">
-      <label>أفق القياس Forward bars
+      <label>أقصى أفق زمني
         <select id="horizon">
-          <option value="3">3 شموع</option>
-          <option value="6" selected>6 شموع</option>
-          <option value="12">12 شمعة</option>
+          <option value="6">6 شموع</option>
+          <option value="12" selected>12 شمعة</option>
           <option value="24">24 شمعة</option>
+          <option value="48">48 شمعة</option>
         </select>
       </label>
-      <label>الحد الأدنى للحركة
-        <select id="minMove">
-          <option value="0">0%</option>
-          <option value="0.001">0.10%</option>
-          <option value="0.002" selected>0.20%</option>
-          <option value="0.005">0.50%</option>
-          <option value="0.01">1.00%</option>
+      <label>الحاجز الإيجابي ATR
+        <select id="tpAtr">
+          <option value="0.75">0.75 ATR</option>
+          <option value="1" selected>1.00 ATR</option>
+          <option value="1.25">1.25 ATR</option>
+          <option value="1.5">1.50 ATR</option>
+          <option value="2">2.00 ATR</option>
         </select>
       </label>
-      <label>عتبة الصعود
+      <label>الحاجز السلبي ATR
+        <select id="slAtr">
+          <option value="0.75">0.75 ATR</option>
+          <option value="1" selected>1.00 ATR</option>
+          <option value="1.25">1.25 ATR</option>
+          <option value="1.5">1.50 ATR</option>
+          <option value="2">2.00 ATR</option>
+        </select>
+      </label>
+      <label>Embargo بعد Purge
+        <select id="embargo">
+          <option value="0">0</option>
+          <option value="2" selected>2 شمعة</option>
+          <option value="4">4 شموع</option>
+          <option value="6">6 شموع</option>
+        </select>
+      </label>
+      <label>عتبة Bull
         <select id="bullThreshold">
           <option>55</option><option>60</option><option selected>65</option><option>70</option><option>75</option><option>80</option>
         </select>
       </label>
-      <label>عتبة الهبوط
+      <label>عتبة Bear
         <select id="bearThreshold">
           <option>45</option><option>40</option><option selected>35</option><option>30</option><option>25</option><option>20</option>
+        </select>
+      </label>
+      <label>أقصى انحراف وزن عن Default
+        <select id="weightDeviation">
+          <option value="0.2">±20%</option>
+          <option value="0.35" selected>±35%</option>
+          <option value="0.5">±50%</option>
+        </select>
+      </label>
+      <label>حالة لمس الحاجزين بنفس الشمعة
+        <select id="sameBarPolicy">
+          <option value="ambiguous" selected>Ambiguous / لا تُحسب Win أو Loss</option>
+          <option value="conservative">Conservative / Loss</option>
         </select>
       </label>
     </div>
@@ -112,30 +141,36 @@
 
   <section id="summaryCard" class="card hidden"></section>
 
-  <section id="metricsGrid" class="grid2 hidden">
+  <section id="coreGrid" class="grid2 hidden">
     <section id="baselineCard" class="card"></section>
     <section id="wfCard" class="card"></section>
   </section>
 
+  <section id="barrierCard" class="card hidden"></section>
   <section id="weightsCard" class="card hidden"></section>
   <section id="thresholdCard" class="card hidden"></section>
+  <section id="calibrationCard" class="card hidden"></section>
 
   <section id="regimeGrid" class="grid2 hidden">
     <section id="sessionCard" class="card"></section>
     <section id="regimeCard" class="card"></section>
   </section>
 
-  <section id="distributionCard" class="card hidden"></section>
-  <section id="methodCard" class="card">
-    <h2>منهجية V5</h2>
+  <section id="robustnessCard" class="card hidden"></section>
+
+  <section class="card">
+    <h2>V5.2 Features</h2>
     <div class="chips">
-      <span>EMA</span><span>Ichimoku</span><span>RSI</span><span>MACD</span><span>ADX</span>
-      <span>VWAP</span><span>Volume</span><span>Confirmed Pivots</span><span>No Look‑Ahead</span>
-      <span>MFE / MAE</span><span>Threshold Sweep</span><span>Walk‑Forward</span><span>Out‑of‑Sample</span>
+      <span>Triple‑Barrier</span><span>ATR barriers</span><span>Timeout</span><span>Same‑bar ambiguity</span>
+      <span>Resolved Accuracy</span><span>Balanced Accuracy</span><span>Precision Bull/Bear</span>
+      <span>Expectancy</span><span>Profit Factor</span><span>MFE / MAE</span>
+      <span>Purged Walk‑Forward</span><span>Embargo</span><span>Regularized Weights</span>
+      <span>MTF No Look‑Ahead</span><span>CHoCH</span><span>Liquidity Sweep</span><span>FVG</span>
+      <span>Relative Strength BTC/ETH</span><span>Calibration</span><span>Cross‑Asset Saved Runs</span>
     </div>
-    <p class="muted">الاختبار هنا تعليمي وبحثي. النتائج التاريخية لا تضمن نتائج مستقبلية، ولا يحول التطبيق النتائج إلى أوامر تداول حقيقية.</p>
+    <p class="muted">هذه نسخة بحث واختبار تاريخي/Paper Research. لا تنشئ أوامر شراء/بيع حقيقية ولا مستويات تنفيذ مالية.</p>
   </section>
 </main>
-<script src="app.js?v=5.1.0"></script>
+<script src="app.js?v=5.2.0"></script>
 </body>
 </html>
