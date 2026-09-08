@@ -1,27 +1,13 @@
-const CACHE='trend-v5-2-20260908';
-const CORE=[
-  './style.css?v=5.2.0',
-  './app.js?v=5.2.0',
-  './manifest.webmanifest?v=5.2.0',
-  './icon-192.png','./icon-512.png'
-];
-self.addEventListener('install',e=>{
-  e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE)).catch(()=>{}));
-  self.skipWaiting();
-});
-self.addEventListener('activate',e=>{
-  e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));
-});
+const CACHE='trend-v5-3-20260908';
+const CORE=['./style.css?v=5.3.0','./app.js?v=5.3.0','./manifest.webmanifest?v=5.3.0','./icon-192.png','./icon-512.png'];
+self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE)).catch(()=>{}));self.skipWaiting();});
+self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
 self.addEventListener('fetch',e=>{
   if(e.request.method!=='GET')return;
-  const u=new URL(e.request.url);
-  if(u.origin!==location.origin)return;
+  const u=new URL(e.request.url);if(u.origin!==location.origin)return;
   const dynamic=e.request.mode==='navigate'||/\/(index\.html|app\.js|style\.css|manifest\.webmanifest)$/.test(u.pathname);
   if(dynamic){
-    e.respondWith(fetch(e.request,{cache:'no-store'}).then(r=>{
-      if(r&&r.ok){const c=r.clone();caches.open(CACHE).then(k=>k.put(e.request,c));}
-      return r;
-    }).catch(()=>caches.match(e.request).then(x=>x||caches.match('./'))));
+    e.respondWith(fetch(e.request,{cache:'no-store'}).then(r=>{if(r&&r.ok){const c=r.clone();caches.open(CACHE).then(k=>k.put(e.request,c));}return r;}).catch(()=>caches.match(e.request).then(x=>x||caches.match('./'))));
   }else{
     e.respondWith(caches.match(e.request).then(x=>x||fetch(e.request).then(r=>{if(r&&r.ok){const c=r.clone();caches.open(CACHE).then(k=>k.put(e.request,c));}return r;})));
   }

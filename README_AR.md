@@ -1,106 +1,80 @@
-# Chart Trend Analyzer V5.2
+# Chart Trend Analyzer V5.3
 
-هذه النسخة تعالج المشاكل التي ظهرت في نتائج BTC / ETH / ADA في V5.
+V5.3 مبني فوق V5.2 ويضيف فصل النموذج حسب اتجاه الإشارة بدل تقييم Long وShort معًا فقط.
 
-## أهم التغييرات
+## الجديد
 
-### 1) Triple‑Barrier بدل إغلاق بعد N شموع
-لكل إشارة:
-- Favorable barrier = ATR × multiplier
-- Adverse barrier = ATR × multiplier
-- Time barrier = أقصى عدد شموع
-
-النتيجة:
-- Win
-- Loss
-- Timeout
-- Ambiguous إذا لمست الشمعة الحاجزين معًا
-
-### 2) Metrics الجديدة
-- Resolved Accuracy
-- Balanced Accuracy
-- Bull Precision
-- Bear Precision
-- Resolution Rate
-- Expectancy
+### Long / Short OOS split
+يعرض لكل اتجاه:
+- Resolved N
+- OOS side accuracy
 - Profit Factor
-- MFE / MAE
-- Signal-sequence Drawdown
+- Expectancy
+- Wins / Losses
+- Sample Reliability
 
-### 3) Purged Walk‑Forward + Embargo
-قبل كل Test fold يتم حذف عدد من شموع التدريب يساوي:
-Horizon + Embargo
+### OOS Filter Engine
+يعتمد فقط على الإشارات الموجودة في Test folds من Purged Walk‑Forward.
+يبحث بالتدرج:
+1. Side + Session + Regime
+2. Side + Session
+3. Side + Regime
+4. Side overall
 
-لمنع تداخل Labels المستقبلية بين Train وTest.
+ولا يستخدم subgroup صغيرًا إذا كان أقل من الحد الأدنى للعينة.
 
-### 4) Regularized Adaptive Weights
-الأوزان لا يسمح لها بالابتعاد بلا حدود عن Default.
-الإعداد الافتراضي ±35%.
+### Confidence Tiers
+- Tier A: عينة أكبر + Accuracy/PF أقوى + Calibration مناسب + Overfit gap منخفض
+- Tier B: دعم تاريخي متوسط
+- Tier C: يمر بالحد الأدنى فقط
+- Tier X: Blocked
 
-### 5) Multi‑Timeframe بدون Look‑Ahead
-Crypto يجلب الفريم الأعلى منفصلًا:
-- 15m → H1 + D1
-- H1 → D1
-- D1 → W1
+### Directional Calibration
+Long وShort منفصلان:
+65-70
+70-75
+75-80
+80-100
 
-ولا يستخدم شمعة الفريم الأعلى إلا بعد وقت إغلاقها.
+### Paper Scenario Engine
+على آخر شمعة مغلقة:
+- يحسب Score بالوزن المحسن
+- يحدد Side البحثي إن تجاوز Threshold
+- يقرأ Session وRegime
+- يبحث عن أقوى subgroup OOS صالح
+- يعرض Allowed / Blocked وTier
 
-### 6) Historical Smart Structure
-- Confirmed pivots
-- BOS-like breaks
-- CHoCH
-- Liquidity Sweep
-- FVG
-وكلها محسوبة زمنيًا بدون استخدام Pivot قبل تأكيده.
+إذا كان Allowed يعرض فقط مستويات محاكاة:
+- Reference close
+- Paper favorable barrier 1
+- Paper adverse barrier
+- Paper extension barrier
 
-### 7) Relative Strength
-Crypto يقارن تاريخيًا مع BTC وETH على نفس الفريم.
+هذه ليست أوامر شراء/بيع أو مستويات تنفيذ بأموال حقيقية.
 
-### 8) Score Calibration
-يعرض هل Score 80–100 يحقق فعلًا نتائج أفضل من 65–70.
-
-### 9) Cross‑Asset Robustness
-يحفظ آخر نتائج BTC / ETH / ADA محليًا داخل الهاتف للمقارنة.
-
-## أول اختبار مقترح
-استخدم نفس الإعدادات على العملات الثلاث:
-
-BTCUSDT
-ETHUSDT
-ADAUSDT
-
+## إعداد الاختبار المقترح لمقارنة BTC / ETH / ADA
 Spot
 1h
 2500 candles
+Horizon 12
+Favorable 1 ATR
+Adverse 1 ATR
+Embargo 2
+Bull 65
+Bear 35
+Weight deviation ±35%
+Ambiguous
 
-Horizon: 12
-TP: 1 ATR
-SL: 1 ATR
-Embargo: 2
-Bull: 65
-Bear: 35
-Weight deviation: ±35%
-Same-bar: Ambiguous
-
-قارن خصوصًا:
-- Out-of-sample Balanced Accuracy
-- Test Profit Factor
-- Test Expectancy
-- Overfit Gap
-- Score Calibration
-- London وLondon/NY Overlap
+Research filter:
+Min OOS sample = 50
+Min side accuracy = 52%
+Min PF = 1.10
+Calibration minimum = 30
 
 ## تحديث GitHub Pages
-استبدل جميع ملفات النسخة القديمة بملفات هذا ZIP ثم Commit.
+استبدل الملفات القديمة بكل ملفات V5.3 ثم Commit.
 
-افتح الموقع لأول مرة بهذا الشكل:
-https://YOURNAME.github.io/YOUR-REPO/?v=5.2
+افتح:
+https://YOURNAME.github.io/YOUR-REPO/?v=5.3
 
-إذا كان التطبيق المثبت قديمًا:
-- افتح رابط GitHub Pages في Chrome.
-- امسح بيانات الموقع عند الحاجة.
-- تأكد أن أعلى الصفحة يظهر V5.2.
-- أعد تثبيت PWA.
-
-## تنبيه
-V5.2 أداة بحث تاريخي وPaper Research. النتائج التاريخية لا تضمن المستقبل ولا تمثل توصية شراء أو بيع.
+وتأكد أن أعلى الصفحة يعرض V5.3.

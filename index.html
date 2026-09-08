@@ -6,18 +6,18 @@
   <meta name="theme-color" content="#06111f">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>Chart Trend Analyzer V5.2</title>
-  <link rel="manifest" href="manifest.webmanifest?v=5.2.0">
+  <title>Chart Trend Analyzer V5.3</title>
+  <link rel="manifest" href="manifest.webmanifest?v=5.3.0">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="style.css?v=5.2.0">
+  <link rel="stylesheet" href="style.css?v=5.3.0">
 </head>
 <body>
 <main class="wrap">
   <header class="topbar">
     <div>
-      <h1>Chart Trend Analyzer <span>V5.2</span></h1>
-      <p>Triple‑Barrier • Purged Walk‑Forward • MTF • Calibration</p>
+      <h1>Chart Trend Analyzer <span>V5.3</span></h1>
+      <p>Side‑Specific OOS • Filter Engine • Confidence Tiers • Paper Scenario</p>
     </div>
     <button id="installBtn" class="install hidden">تثبيت التطبيق</button>
   </header>
@@ -44,7 +44,7 @@
             <option value="1d">1d</option>
           </select>
         </label>
-        <label>عدد شموع الفريم الأساسي
+        <label>عدد الشموع
           <select id="historySize">
             <option value="1500">1500</option>
             <option value="2500" selected>2500</option>
@@ -53,8 +53,7 @@
           </select>
         </label>
       </div>
-      <button id="runCryptoBtn" class="primary">تشغيل V5.2 Research Test</button>
-      <p class="muted">يتم جلب الفريمات الأعلى وBTC/ETH تاريخيًا بصورة منفصلة عند الحاجة، مع استخدام الشموع الأعلى بعد إغلاقها فقط.</p>
+      <button id="runCryptoBtn" class="primary">تشغيل V5.3 Research Test</button>
     </div>
 
     <div id="forexControls" class="hidden">
@@ -69,15 +68,14 @@
         </label>
       </div>
       <label class="filelabel">CSV تاريخي<input id="forexCsv" type="file" accept=".csv,text/csv"></label>
-      <button id="runForexBtn" class="primary">تشغيل V5.2 على CSV</button>
-      <p class="muted">Forex CSV يستخدم MTF مشتقًا من نفس البيانات عند توفر تاريخ كافٍ. الأعمدة: Time/Open/High/Low/Close وVolume اختياري.</p>
+      <button id="runForexBtn" class="primary">تشغيل V5.3 على CSV</button>
     </div>
   </section>
 
   <section class="card">
     <h2>Triple‑Barrier & Validation</h2>
     <div class="formgrid">
-      <label>أقصى أفق زمني
+      <label>أقصى أفق
         <select id="horizon">
           <option value="6">6 شموع</option>
           <option value="12" selected>12 شمعة</option>
@@ -85,7 +83,7 @@
           <option value="48">48 شمعة</option>
         </select>
       </label>
-      <label>الحاجز الإيجابي ATR
+      <label>Paper favorable barrier
         <select id="tpAtr">
           <option value="0.75">0.75 ATR</option>
           <option value="1" selected>1.00 ATR</option>
@@ -94,7 +92,7 @@
           <option value="2">2.00 ATR</option>
         </select>
       </label>
-      <label>الحاجز السلبي ATR
+      <label>Paper adverse barrier
         <select id="slAtr">
           <option value="0.75">0.75 ATR</option>
           <option value="1" selected>1.00 ATR</option>
@@ -103,7 +101,7 @@
           <option value="2">2.00 ATR</option>
         </select>
       </label>
-      <label>Embargo بعد Purge
+      <label>Embargo
         <select id="embargo">
           <option value="0">0</option>
           <option value="2" selected>2 شمعة</option>
@@ -111,45 +109,90 @@
           <option value="6">6 شموع</option>
         </select>
       </label>
-      <label>عتبة Bull
+      <label>Bull threshold
         <select id="bullThreshold">
           <option>55</option><option>60</option><option selected>65</option><option>70</option><option>75</option><option>80</option>
         </select>
       </label>
-      <label>عتبة Bear
+      <label>Bear threshold
         <select id="bearThreshold">
           <option>45</option><option>40</option><option selected>35</option><option>30</option><option>25</option><option>20</option>
         </select>
       </label>
-      <label>أقصى انحراف وزن عن Default
+      <label>انحراف الأوزان
         <select id="weightDeviation">
           <option value="0.2">±20%</option>
           <option value="0.35" selected>±35%</option>
           <option value="0.5">±50%</option>
         </select>
       </label>
-      <label>حالة لمس الحاجزين بنفس الشمعة
+      <label>لمس الحاجزين بنفس الشمعة
         <select id="sameBarPolicy">
-          <option value="ambiguous" selected>Ambiguous / لا تُحسب Win أو Loss</option>
+          <option value="ambiguous" selected>Ambiguous</option>
           <option value="conservative">Conservative / Loss</option>
         </select>
       </label>
     </div>
   </section>
 
+  <section class="card">
+    <h2>Research Filter Rules</h2>
+    <div class="formgrid">
+      <label>الحد الأدنى لعينة OOS
+        <select id="minSample">
+          <option value="30">30</option>
+          <option value="50" selected>50</option>
+          <option value="75">75</option>
+          <option value="100">100</option>
+        </select>
+      </label>
+      <label>الحد الأدنى لدقة الجانب OOS
+        <select id="minAccuracy">
+          <option value="0.50">50%</option>
+          <option value="0.52" selected>52%</option>
+          <option value="0.55">55%</option>
+          <option value="0.58">58%</option>
+        </select>
+      </label>
+      <label>الحد الأدنى Profit Factor
+        <select id="minPF">
+          <option value="1">1.00</option>
+          <option value="1.05">1.05</option>
+          <option value="1.10" selected>1.10</option>
+          <option value="1.20">1.20</option>
+        </select>
+      </label>
+      <label>Calibration minimum samples
+        <select id="calMinSample">
+          <option value="20">20</option>
+          <option value="30" selected>30</option>
+          <option value="50">50</option>
+        </select>
+      </label>
+    </div>
+    <p class="muted">هذه الفلاتر لا تنفذ صفقة. هي تقرر فقط هل السيناريو البحثي الحالي مدعوم تاريخيًا بما يكفي ليظهر كـ Allowed أو Blocked.</p>
+  </section>
+
   <div id="status"></div>
 
   <section id="summaryCard" class="card hidden"></section>
 
-  <section id="coreGrid" class="grid2 hidden">
-    <section id="baselineCard" class="card"></section>
-    <section id="wfCard" class="card"></section>
+  <section id="sideGrid" class="grid2 hidden">
+    <section id="longCard" class="card"></section>
+    <section id="shortCard" class="card"></section>
   </section>
 
-  <section id="barrierCard" class="card hidden"></section>
+  <section id="scenarioCard" class="card hidden"></section>
+  <section id="filterMatrixCard" class="card hidden"></section>
+  <section id="calibrationCard" class="card hidden"></section>
+
+  <section id="coreGrid" class="grid2 hidden">
+    <section id="wfCard" class="card"></section>
+    <section id="reliabilityCard" class="card"></section>
+  </section>
+
   <section id="weightsCard" class="card hidden"></section>
   <section id="thresholdCard" class="card hidden"></section>
-  <section id="calibrationCard" class="card hidden"></section>
 
   <section id="regimeGrid" class="grid2 hidden">
     <section id="sessionCard" class="card"></section>
@@ -159,18 +202,18 @@
   <section id="robustnessCard" class="card hidden"></section>
 
   <section class="card">
-    <h2>V5.2 Features</h2>
+    <h2>V5.3 Research Features</h2>
     <div class="chips">
-      <span>Triple‑Barrier</span><span>ATR barriers</span><span>Timeout</span><span>Same‑bar ambiguity</span>
-      <span>Resolved Accuracy</span><span>Balanced Accuracy</span><span>Precision Bull/Bear</span>
-      <span>Expectancy</span><span>Profit Factor</span><span>MFE / MAE</span>
-      <span>Purged Walk‑Forward</span><span>Embargo</span><span>Regularized Weights</span>
-      <span>MTF No Look‑Ahead</span><span>CHoCH</span><span>Liquidity Sweep</span><span>FVG</span>
-      <span>Relative Strength BTC/ETH</span><span>Calibration</span><span>Cross‑Asset Saved Runs</span>
+      <span>Long / Short split</span><span>OOS only filters</span><span>Session × Regime</span>
+      <span>Sample Reliability</span><span>Tier A/B/C</span><span>Directional Calibration</span>
+      <span>Triple‑Barrier</span><span>Purged Walk‑Forward</span><span>Embargo</span>
+      <span>Regularized Weights</span><span>MTF No Look‑Ahead</span>
+      <span>CHoCH</span><span>Liquidity Sweep</span><span>FVG</span><span>Relative BTC/ETH</span>
+      <span>Paper Scenario Engine</span>
     </div>
-    <p class="muted">هذه نسخة بحث واختبار تاريخي/Paper Research. لا تنشئ أوامر شراء/بيع حقيقية ولا مستويات تنفيذ مالية.</p>
+    <p class="muted">Paper Scenario يعرض مستويات محاكاة بحثية مشتقة من ATR لقياس الفرضية تاريخيًا. ليست أوامر تداول أو توصيات لتنفيذ أموال حقيقية.</p>
   </section>
 </main>
-<script src="app.js?v=5.2.0"></script>
+<script src="app.js?v=5.3.0"></script>
 </body>
 </html>
