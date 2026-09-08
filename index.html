@@ -1,53 +1,141 @@
 <!doctype html>
 <html lang="ar" dir="rtl">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#07111f">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<title>Chart Trend Analyzer V4</title>
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#07111f">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Chart Trend Analyzer V5</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <main class="wrap">
-<header class="topbar">
-<div><h1>Chart Trend Analyzer <span>V4</span></h1><p>Advanced Market Intelligence</p></div>
-<button id="installBtn" class="install hidden">تثبيت التطبيق</button>
-</header>
+  <header class="topbar">
+    <div>
+      <h1>Chart Trend Analyzer <span>V5</span></h1>
+      <p>Backtesting • Walk‑Forward • Adaptive Weights</p>
+    </div>
+    <button id="installBtn" class="install hidden">تثبيت التطبيق</button>
+  </header>
 
-<section class="card">
-<div class="market-tabs">
-<button class="marketTab active" data-marketmode="crypto">Crypto</button>
-<button class="marketTab" data-marketmode="forex">Forex</button>
-</div>
-<div id="cryptoControls">
-<h2>تحليل كريبتو متقدم</h2>
-<div class="formgrid"><label>الرمز<input id="symbol" value="BTCUSDT" placeholder="BTCUSDT"></label><label>السوق<select id="market"><option value="spot">Binance Spot</option><option value="futures">Binance USD-M Futures</option></select></label></div>
-<button id="analyzeCryptoBtn" class="primary">تحليل D1 + H1 + M15</button>
-</div>
-<div id="forexControls" class="hidden">
-<h2>تحليل Forex</h2>
-<div class="formgrid"><label>الزوج<input id="forexSymbol" value="EUR/USD" placeholder="EUR/USD"></label><label>Backend URL<input id="backendUrl" type="url" placeholder="https://your-backend.example.com"></label></div>
-<button id="analyzeForexLiveBtn" class="primary">تحليل Forex مباشر عبر Backend</button>
-<details><summary>بديل بدون Backend: رفع CSV من الهاتف</summary><div class="csvgrid"><label>D1<input id="csvD1" type="file" accept=".csv,text/csv"></label><label>H1<input id="csvH1" type="file" accept=".csv,text/csv"></label><label>M15<input id="csvM15" type="file" accept=".csv,text/csv"></label></div><button id="analyzeCsvBtn" class="secondary">تحليل ملفات CSV</button></details>
-</div>
-</section>
-<div id="status"></div>
-<section id="masterCard" class="card hidden"></section>
-<section id="contextPanel" class="contextgrid hidden"><section id="marketContextCard" class="card"></section><section id="riskCard" class="card"></section></section>
-<section id="newsCard" class="card hidden"></section>
-<section id="workspace" class="hidden">
-<div id="tabs" class="tabs"></div>
-<section class="card"><div class="charthead"><div><h2 id="chartTitle">الشارت</h2><div id="chartMeta" class="muted"></div></div><div class="legend"><span class="ema20">EMA20</span><span class="ema50">EMA50</span><span class="ema200">EMA200</span><span class="tenkan">Tenkan</span><span class="kijun">Kijun</span><span>HH/HL/LH/LL • BOS • CHoCH</span></div></div><div class="chartwrap"><canvas id="chartCanvas"></canvas><div id="tooltip" class="tooltip hidden"></div></div></section>
-<section class="grid2"><section id="advancedPanel" class="card"></section><section id="indicatorPanel" class="card"></section></section>
-<section id="structurePanel" class="card"></section>
-</section>
-<section id="visionCard" class="card hidden"><h2>تحقق بصري اختياري عبر OpenAI</h2><p class="muted">يستخدم Backend نفسه، ولا يتم وضع مفتاح OpenAI داخل PWA.</p><div class="formgrid"><label>الفريم<select id="verifyTf"><option>D1</option><option>H1</option><option selected>M15</option></select></label><label>صورة الشارت<input id="verifyImg" type="file" accept="image/*"></label></div><button id="verifyBtn" class="secondary">تحقق من الصورة</button><div id="verification"></div></section>
-<section class="card"><h2>ما الذي يحلله V4؟</h2><div class="chips"><span>Market Structure</span><span>Ichimoku</span><span>EMA</span><span>MACD</span><span>RSI</span><span>ADX / DI</span><span>VWAP</span><span>Bollinger Width</span><span>ATR</span><span>Volume</span><span>CHoCH</span><span>Liquidity Sweep</span><span>Equal High/Low</span><span>FVG</span><span>Sessions</span><span>BTC/ETH Context</span><span>Funding</span><span>Open Interest</span></div><p class="muted">Bias Score وConfidence هما تقييمات تحليلية وليسا احتمالًا مضمونًا أو توصية تنفيذ صفقة.</p></section>
+  <section class="card">
+    <div class="mode-tabs">
+      <button class="modeTab active" data-mode="crypto">Crypto Backtest</button>
+      <button class="modeTab" data-mode="forex">Forex CSV Backtest</button>
+    </div>
+
+    <div id="cryptoControls">
+      <div class="formgrid">
+        <label>الرمز<input id="symbol" value="BTCUSDT" placeholder="BTCUSDT"></label>
+        <label>السوق
+          <select id="market">
+            <option value="spot">Binance Spot</option>
+            <option value="futures">Binance USD-M Futures</option>
+          </select>
+        </label>
+        <label>الفريم
+          <select id="timeframe">
+            <option value="15m">15m</option>
+            <option value="1h" selected>1h</option>
+            <option value="1d">1d</option>
+          </select>
+        </label>
+        <label>عدد الشموع
+          <select id="historySize">
+            <option value="1000">1000</option>
+            <option value="2500" selected>2500</option>
+            <option value="5000">5000</option>
+            <option value="7500">7500</option>
+          </select>
+        </label>
+      </div>
+      <button id="runCryptoBtn" class="primary">تشغيل Backtest + Walk‑Forward</button>
+    </div>
+
+    <div id="forexControls" class="hidden">
+      <div class="formgrid">
+        <label>اسم الزوج<input id="forexSymbol" value="EUR/USD"></label>
+        <label>الفريم
+          <select id="forexTf">
+            <option value="15m">15m</option>
+            <option value="1h" selected>1h</option>
+            <option value="1d">1d</option>
+          </select>
+        </label>
+      </div>
+      <label class="filelabel">ملف CSV تاريخي
+        <input id="forexCsv" type="file" accept=".csv,text/csv">
+      </label>
+      <button id="runForexBtn" class="primary">تشغيل Backtest على CSV</button>
+      <p class="muted">الأعمدة المطلوبة: Time, Open, High, Low, Close. ويفضل Volume.</p>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>إعدادات الاختبار</h2>
+    <div class="formgrid">
+      <label>أفق القياس Forward bars
+        <select id="horizon">
+          <option value="3">3 شموع</option>
+          <option value="6" selected>6 شموع</option>
+          <option value="12">12 شمعة</option>
+          <option value="24">24 شمعة</option>
+        </select>
+      </label>
+      <label>الحد الأدنى للحركة
+        <select id="minMove">
+          <option value="0">0%</option>
+          <option value="0.001">0.10%</option>
+          <option value="0.002" selected>0.20%</option>
+          <option value="0.005">0.50%</option>
+          <option value="0.01">1.00%</option>
+        </select>
+      </label>
+      <label>عتبة الصعود
+        <select id="bullThreshold">
+          <option>55</option><option>60</option><option selected>65</option><option>70</option><option>75</option><option>80</option>
+        </select>
+      </label>
+      <label>عتبة الهبوط
+        <select id="bearThreshold">
+          <option>45</option><option>40</option><option selected>35</option><option>30</option><option>25</option><option>20</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <div id="status"></div>
+
+  <section id="summaryCard" class="card hidden"></section>
+
+  <section id="metricsGrid" class="grid2 hidden">
+    <section id="baselineCard" class="card"></section>
+    <section id="wfCard" class="card"></section>
+  </section>
+
+  <section id="weightsCard" class="card hidden"></section>
+  <section id="thresholdCard" class="card hidden"></section>
+
+  <section id="regimeGrid" class="grid2 hidden">
+    <section id="sessionCard" class="card"></section>
+    <section id="regimeCard" class="card"></section>
+  </section>
+
+  <section id="distributionCard" class="card hidden"></section>
+  <section id="methodCard" class="card">
+    <h2>منهجية V5</h2>
+    <div class="chips">
+      <span>EMA</span><span>Ichimoku</span><span>RSI</span><span>MACD</span><span>ADX</span>
+      <span>VWAP</span><span>Volume</span><span>Confirmed Pivots</span><span>No Look‑Ahead</span>
+      <span>MFE / MAE</span><span>Threshold Sweep</span><span>Walk‑Forward</span><span>Out‑of‑Sample</span>
+    </div>
+    <p class="muted">الاختبار هنا تعليمي وبحثي. النتائج التاريخية لا تضمن نتائج مستقبلية، ولا يحول التطبيق النتائج إلى أوامر تداول حقيقية.</p>
+  </section>
 </main>
 <script src="app.js"></script>
-</body></html>
+</body>
+</html>
