@@ -6,214 +6,101 @@
   <meta name="theme-color" content="#06111f">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>Chart Trend Analyzer V5.3</title>
-  <link rel="manifest" href="manifest.webmanifest?v=5.3.0">
+  <title>Chart Trend Analyzer V5.4</title>
+  <link rel="manifest" href="manifest.webmanifest?v=5.4.0">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="style.css?v=5.3.0">
+  <link rel="stylesheet" href="style.css?v=5.4.0">
 </head>
 <body>
 <main class="wrap">
   <header class="topbar">
     <div>
-      <h1>Chart Trend Analyzer <span>V5.3</span></h1>
-      <p>Side‑Specific OOS • Filter Engine • Confidence Tiers • Paper Scenario</p>
+      <h1>Chart Trend Analyzer <span>V5.4</span></h1>
+      <p>Live Multi‑Timeframe Intelligence • M15 / H1 / D1 • Paper Scenarios</p>
     </div>
     <button id="installBtn" class="install hidden">تثبيت التطبيق</button>
   </header>
 
   <section class="card">
     <div class="mode-tabs">
-      <button class="modeTab active" data-mode="crypto">Crypto Research</button>
-      <button class="modeTab" data-mode="forex">Forex CSV Research</button>
+      <button class="modeTab active" data-mode="live">Live MTF Analysis</button>
+      <button class="modeTab" data-mode="research">Research Backtest</button>
     </div>
 
-    <div id="cryptoControls">
+    <div id="liveControls">
+      <h2>تحليل العملة على M15 / H1 / D1</h2>
       <div class="formgrid">
-        <label>الرمز<input id="symbol" value="BTCUSDT" placeholder="BTCUSDT"></label>
+        <label>الرمز<input id="liveSymbol" value="BTCUSDT" placeholder="BTCUSDT"></label>
         <label>السوق
-          <select id="market">
+          <select id="liveMarket">
             <option value="spot">Binance Spot</option>
-            <option value="futures">Binance USD-M Futures</option>
+            <option value="futures">Binance USD‑M Futures</option>
           </select>
         </label>
-        <label>الفريم الأساسي
-          <select id="timeframe">
-            <option value="15m">15m</option>
-            <option value="1h" selected>1h</option>
-            <option value="1d">1d</option>
+        <label>الحد الأدنى لعينة OOS
+          <select id="liveMinSample">
+            <option value="30">30</option>
+            <option value="50" selected>50</option>
+            <option value="75">75</option>
+            <option value="100">100</option>
           </select>
         </label>
-        <label>عدد الشموع
-          <select id="historySize">
-            <option value="1500">1500</option>
-            <option value="2500" selected>2500</option>
-            <option value="5000">5000</option>
-            <option value="7500">7500</option>
+        <label>الحد الأدنى PF
+          <select id="liveMinPF">
+            <option value="1">1.00</option>
+            <option value="1.05">1.05</option>
+            <option value="1.10" selected>1.10</option>
+            <option value="1.20">1.20</option>
           </select>
         </label>
       </div>
-      <button id="runCryptoBtn" class="primary">تشغيل V5.3 Research Test</button>
+      <button id="runLiveBtn" class="primary">تحليل شامل الآن</button>
+      <p class="muted">يجلب 15m و1h و1d وسياق BTC/ETH، ثم يجري اختبارًا تاريخيًا مختصرًا لكل فريم قبل السماح بأي سيناريو Paper.</p>
     </div>
 
-    <div id="forexControls" class="hidden">
+    <div id="researchControls" class="hidden">
+      <h2>Research Backtest</h2>
       <div class="formgrid">
-        <label>الزوج<input id="forexSymbol" value="EUR/USD"></label>
-        <label>الفريم
-          <select id="forexTf">
-            <option value="15m">15m</option>
-            <option value="1h" selected>1h</option>
-            <option value="1d">1d</option>
-          </select>
-        </label>
+        <label>الرمز<input id="symbol" value="BTCUSDT"></label>
+        <label>السوق<select id="market"><option value="spot">Binance Spot</option><option value="futures">Binance Futures</option></select></label>
+        <label>الفريم<select id="timeframe"><option value="15m">15m</option><option value="1h" selected>1h</option><option value="1d">1d</option></select></label>
+        <label>عدد الشموع<select id="historySize"><option value="1500">1500</option><option value="2500" selected>2500</option><option value="5000">5000</option></select></label>
       </div>
-      <label class="filelabel">CSV تاريخي<input id="forexCsv" type="file" accept=".csv,text/csv"></label>
-      <button id="runForexBtn" class="primary">تشغيل V5.3 على CSV</button>
+      <button id="runResearchBtn" class="primary">تشغيل Research Test</button>
     </div>
-  </section>
-
-  <section class="card">
-    <h2>Triple‑Barrier & Validation</h2>
-    <div class="formgrid">
-      <label>أقصى أفق
-        <select id="horizon">
-          <option value="6">6 شموع</option>
-          <option value="12" selected>12 شمعة</option>
-          <option value="24">24 شمعة</option>
-          <option value="48">48 شمعة</option>
-        </select>
-      </label>
-      <label>Paper favorable barrier
-        <select id="tpAtr">
-          <option value="0.75">0.75 ATR</option>
-          <option value="1" selected>1.00 ATR</option>
-          <option value="1.25">1.25 ATR</option>
-          <option value="1.5">1.50 ATR</option>
-          <option value="2">2.00 ATR</option>
-        </select>
-      </label>
-      <label>Paper adverse barrier
-        <select id="slAtr">
-          <option value="0.75">0.75 ATR</option>
-          <option value="1" selected>1.00 ATR</option>
-          <option value="1.25">1.25 ATR</option>
-          <option value="1.5">1.50 ATR</option>
-          <option value="2">2.00 ATR</option>
-        </select>
-      </label>
-      <label>Embargo
-        <select id="embargo">
-          <option value="0">0</option>
-          <option value="2" selected>2 شمعة</option>
-          <option value="4">4 شموع</option>
-          <option value="6">6 شموع</option>
-        </select>
-      </label>
-      <label>Bull threshold
-        <select id="bullThreshold">
-          <option>55</option><option>60</option><option selected>65</option><option>70</option><option>75</option><option>80</option>
-        </select>
-      </label>
-      <label>Bear threshold
-        <select id="bearThreshold">
-          <option>45</option><option>40</option><option selected>35</option><option>30</option><option>25</option><option>20</option>
-        </select>
-      </label>
-      <label>انحراف الأوزان
-        <select id="weightDeviation">
-          <option value="0.2">±20%</option>
-          <option value="0.35" selected>±35%</option>
-          <option value="0.5">±50%</option>
-        </select>
-      </label>
-      <label>لمس الحاجزين بنفس الشمعة
-        <select id="sameBarPolicy">
-          <option value="ambiguous" selected>Ambiguous</option>
-          <option value="conservative">Conservative / Loss</option>
-        </select>
-      </label>
-    </div>
-  </section>
-
-  <section class="card">
-    <h2>Research Filter Rules</h2>
-    <div class="formgrid">
-      <label>الحد الأدنى لعينة OOS
-        <select id="minSample">
-          <option value="30">30</option>
-          <option value="50" selected>50</option>
-          <option value="75">75</option>
-          <option value="100">100</option>
-        </select>
-      </label>
-      <label>الحد الأدنى لدقة الجانب OOS
-        <select id="minAccuracy">
-          <option value="0.50">50%</option>
-          <option value="0.52" selected>52%</option>
-          <option value="0.55">55%</option>
-          <option value="0.58">58%</option>
-        </select>
-      </label>
-      <label>الحد الأدنى Profit Factor
-        <select id="minPF">
-          <option value="1">1.00</option>
-          <option value="1.05">1.05</option>
-          <option value="1.10" selected>1.10</option>
-          <option value="1.20">1.20</option>
-        </select>
-      </label>
-      <label>Calibration minimum samples
-        <select id="calMinSample">
-          <option value="20">20</option>
-          <option value="30" selected>30</option>
-          <option value="50">50</option>
-        </select>
-      </label>
-    </div>
-    <p class="muted">هذه الفلاتر لا تنفذ صفقة. هي تقرر فقط هل السيناريو البحثي الحالي مدعوم تاريخيًا بما يكفي ليظهر كـ Allowed أو Blocked.</p>
   </section>
 
   <div id="status"></div>
 
-  <section id="summaryCard" class="card hidden"></section>
+  <section id="marketOverview" class="card hidden"></section>
+  <section id="mtfCards" class="mtfgrid hidden"></section>
 
-  <section id="sideGrid" class="grid2 hidden">
-    <section id="longCard" class="card"></section>
-    <section id="shortCard" class="card"></section>
+  <section id="detailsPanel" class="hidden">
+    <div id="tfTabs" class="tabs"></div>
+    <section id="tfSummary" class="card"></section>
+    <section id="tfScenario" class="card"></section>
+    <section id="tfEvidence" class="card"></section>
+    <section id="tfIndicators" class="card"></section>
   </section>
 
-  <section id="scenarioCard" class="card hidden"></section>
-  <section id="filterMatrixCard" class="card hidden"></section>
-  <section id="calibrationCard" class="card hidden"></section>
-
-  <section id="coreGrid" class="grid2 hidden">
-    <section id="wfCard" class="card"></section>
-    <section id="reliabilityCard" class="card"></section>
+  <section id="researchPanel" class="hidden">
+    <section id="researchSummary" class="card"></section>
+    <section id="researchSides" class="grid2"></section>
+    <section id="researchCalibration" class="card"></section>
   </section>
-
-  <section id="weightsCard" class="card hidden"></section>
-  <section id="thresholdCard" class="card hidden"></section>
-
-  <section id="regimeGrid" class="grid2 hidden">
-    <section id="sessionCard" class="card"></section>
-    <section id="regimeCard" class="card"></section>
-  </section>
-
-  <section id="robustnessCard" class="card hidden"></section>
 
   <section class="card">
-    <h2>V5.3 Research Features</h2>
+    <h2>V5.4 Decision Logic</h2>
     <div class="chips">
-      <span>Long / Short split</span><span>OOS only filters</span><span>Session × Regime</span>
-      <span>Sample Reliability</span><span>Tier A/B/C</span><span>Directional Calibration</span>
-      <span>Triple‑Barrier</span><span>Purged Walk‑Forward</span><span>Embargo</span>
-      <span>Regularized Weights</span><span>MTF No Look‑Ahead</span>
-      <span>CHoCH</span><span>Liquidity Sweep</span><span>FVG</span><span>Relative BTC/ETH</span>
-      <span>Paper Scenario Engine</span>
+      <span>Market context BTC/ETH</span><span>Market Structure</span><span>EMA</span><span>Ichimoku</span>
+      <span>RSI</span><span>MACD</span><span>ADX</span><span>Volume</span>
+      <span>Support/Resistance</span><span>MTF alignment</span><span>OOS Long/Short validation</span>
+      <span>Paper Entry/Stop/TP1/TP2</span>
     </div>
-    <p class="muted">Paper Scenario يعرض مستويات محاكاة بحثية مشتقة من ATR لقياس الفرضية تاريخيًا. ليست أوامر تداول أو توصيات لتنفيذ أموال حقيقية.</p>
+    <p class="muted">Paper Entry / Stop / TP هي مستويات محاكاة تعليمية لاختبار المنهجية وليست أوامر تداول حقيقية.</p>
   </section>
 </main>
-<script src="app.js?v=5.3.0"></script>
+<script src="app.js?v=5.4.0"></script>
 </body>
 </html>

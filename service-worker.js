@@ -1,5 +1,5 @@
-const CACHE='trend-v5-3-20260908';
-const CORE=['./style.css?v=5.3.0','./app.js?v=5.3.0','./manifest.webmanifest?v=5.3.0','./icon-192.png','./icon-512.png'];
+const CACHE='trend-v5-4-20260908';
+const CORE=['./style.css?v=5.4.0','./app.js?v=5.4.0','./manifest.webmanifest?v=5.4.0','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE)).catch(()=>{}));self.skipWaiting();});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
 self.addEventListener('fetch',e=>{
