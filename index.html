@@ -1,121 +1,53 @@
 <!doctype html>
 <html lang="ar" dir="rtl">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#0b1020">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Trend Analyzer">
-  <title>Chart Trend Analyzer</title>
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icon-192.png">
-  <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#07111f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Chart Trend Analyzer V4</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main class="wrap">
-    <header class="topbar">
-      <div>
-        <h1>Chart Trend Analyzer</h1>
-        <p>تحليل D1 / H1 / M15 من الهاتف</p>
-      </div>
-      <button id="installBtn" class="install hidden">تثبيت التطبيق</button>
-    </header>
+<main class="wrap">
+<header class="topbar">
+<div><h1>Chart Trend Analyzer <span>V4</span></h1><p>Advanced Market Intelligence</p></div>
+<button id="installBtn" class="install hidden">تثبيت التطبيق</button>
+</header>
 
-    <section class="card">
-      <h2>تحليل كريبتو مباشر</h2>
-      <div class="formgrid">
-        <label>
-          الرمز
-          <input id="symbol" value="BTCUSDT" inputmode="text" autocomplete="off" placeholder="BTCUSDT">
-        </label>
-        <label>
-          السوق
-          <select id="market">
-            <option value="spot">Binance Spot</option>
-            <option value="futures">Binance USD-M Futures</option>
-          </select>
-        </label>
-      </div>
-      <button id="analyzeBtn" class="primary">تحليل السوق</button>
-      <p class="muted">يتم جلب OHLCV العامة وحساب المؤشرات داخل الهاتف.</p>
-    </section>
-
-    <div id="status"></div>
-
-    <section id="masterCard" class="card hidden"></section>
-
-    <section id="workspace" class="hidden">
-      <div id="tabs" class="tabs"></div>
-
-      <section class="card">
-        <div class="charthead">
-          <div>
-            <h2 id="chartTitle">الشارت</h2>
-            <div id="chartMeta" class="muted"></div>
-          </div>
-          <div class="legend">
-            <span class="ema20">EMA20</span>
-            <span class="ema50">EMA50</span>
-            <span class="ema200">EMA200</span>
-            <span>HH/HL/LH/LL + BOS</span>
-          </div>
-        </div>
-        <div class="chartwrap">
-          <canvas id="chartCanvas"></canvas>
-          <div id="tooltip" class="tooltip hidden"></div>
-        </div>
-      </section>
-
-      <section class="grid2">
-        <section id="scorePanel" class="card"></section>
-        <section id="indicatorPanel" class="card"></section>
-      </section>
-    </section>
-
-    <section id="verifyCard" class="card hidden">
-      <h2>تحقق بصري اختياري عبر OpenAI</h2>
-      <p class="muted">يتطلب Backend خارجيًا آمنًا. لا يتم وضع مفتاح OpenAI داخل التطبيق.</p>
-      <label>
-        Backend URL
-        <input id="backendUrl" type="url" placeholder="https://your-server.example.com">
-      </label>
-      <div class="formgrid">
-        <label>
-          الفريم
-          <select id="verifyTf">
-            <option>D1</option>
-            <option>H1</option>
-            <option selected>M15</option>
-          </select>
-        </label>
-        <label>
-          صورة الشارت
-          <input id="verifyImg" type="file" accept="image/*">
-        </label>
-      </div>
-      <button id="verifyBtn" class="secondary">تحقق من الصورة</button>
-      <div id="verification"></div>
-    </section>
-
-    <section class="card">
-      <h2>الأوزان</h2>
-      <div class="chips">
-        <span>Structure 25</span>
-        <span>EMA Order 15</span>
-        <span>EMA Slope 10</span>
-        <span>RSI 10</span>
-        <span>ADX/DI 10</span>
-        <span>Volume 10</span>
-        <span>Support/Resistance 10</span>
-        <span>Break + Retest 10</span>
-      </div>
-      <p class="muted">Master: D1 = 35% • H1 = 40% • M15 = 25%. هذه درجة توافق فني تعليمية وليست توصية شراء أو بيع.</p>
-    </section>
-  </main>
-
-  <script src="app.js"></script>
-</body>
-</html>
+<section class="card">
+<div class="market-tabs">
+<button class="marketTab active" data-marketmode="crypto">Crypto</button>
+<button class="marketTab" data-marketmode="forex">Forex</button>
+</div>
+<div id="cryptoControls">
+<h2>تحليل كريبتو متقدم</h2>
+<div class="formgrid"><label>الرمز<input id="symbol" value="BTCUSDT" placeholder="BTCUSDT"></label><label>السوق<select id="market"><option value="spot">Binance Spot</option><option value="futures">Binance USD-M Futures</option></select></label></div>
+<button id="analyzeCryptoBtn" class="primary">تحليل D1 + H1 + M15</button>
+</div>
+<div id="forexControls" class="hidden">
+<h2>تحليل Forex</h2>
+<div class="formgrid"><label>الزوج<input id="forexSymbol" value="EUR/USD" placeholder="EUR/USD"></label><label>Backend URL<input id="backendUrl" type="url" placeholder="https://your-backend.example.com"></label></div>
+<button id="analyzeForexLiveBtn" class="primary">تحليل Forex مباشر عبر Backend</button>
+<details><summary>بديل بدون Backend: رفع CSV من الهاتف</summary><div class="csvgrid"><label>D1<input id="csvD1" type="file" accept=".csv,text/csv"></label><label>H1<input id="csvH1" type="file" accept=".csv,text/csv"></label><label>M15<input id="csvM15" type="file" accept=".csv,text/csv"></label></div><button id="analyzeCsvBtn" class="secondary">تحليل ملفات CSV</button></details>
+</div>
+</section>
+<div id="status"></div>
+<section id="masterCard" class="card hidden"></section>
+<section id="contextPanel" class="contextgrid hidden"><section id="marketContextCard" class="card"></section><section id="riskCard" class="card"></section></section>
+<section id="newsCard" class="card hidden"></section>
+<section id="workspace" class="hidden">
+<div id="tabs" class="tabs"></div>
+<section class="card"><div class="charthead"><div><h2 id="chartTitle">الشارت</h2><div id="chartMeta" class="muted"></div></div><div class="legend"><span class="ema20">EMA20</span><span class="ema50">EMA50</span><span class="ema200">EMA200</span><span class="tenkan">Tenkan</span><span class="kijun">Kijun</span><span>HH/HL/LH/LL • BOS • CHoCH</span></div></div><div class="chartwrap"><canvas id="chartCanvas"></canvas><div id="tooltip" class="tooltip hidden"></div></div></section>
+<section class="grid2"><section id="advancedPanel" class="card"></section><section id="indicatorPanel" class="card"></section></section>
+<section id="structurePanel" class="card"></section>
+</section>
+<section id="visionCard" class="card hidden"><h2>تحقق بصري اختياري عبر OpenAI</h2><p class="muted">يستخدم Backend نفسه، ولا يتم وضع مفتاح OpenAI داخل PWA.</p><div class="formgrid"><label>الفريم<select id="verifyTf"><option>D1</option><option>H1</option><option selected>M15</option></select></label><label>صورة الشارت<input id="verifyImg" type="file" accept="image/*"></label></div><button id="verifyBtn" class="secondary">تحقق من الصورة</button><div id="verification"></div></section>
+<section class="card"><h2>ما الذي يحلله V4؟</h2><div class="chips"><span>Market Structure</span><span>Ichimoku</span><span>EMA</span><span>MACD</span><span>RSI</span><span>ADX / DI</span><span>VWAP</span><span>Bollinger Width</span><span>ATR</span><span>Volume</span><span>CHoCH</span><span>Liquidity Sweep</span><span>Equal High/Low</span><span>FVG</span><span>Sessions</span><span>BTC/ETH Context</span><span>Funding</span><span>Open Interest</span></div><p class="muted">Bias Score وConfidence هما تقييمات تحليلية وليسا احتمالًا مضمونًا أو توصية تنفيذ صفقة.</p></section>
+</main>
+<script src="app.js"></script>
+</body></html>
