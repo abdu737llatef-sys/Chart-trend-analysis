@@ -55,3 +55,21 @@ table{width:100%;border-collapse:collapse;min-width:760px}th,td{padding:9px 8px;
 .okflag{display:inline-block;margin:2px;padding:3px 6px;border-radius:999px;border:1px solid #286858;background:#102924;color:#86eccd;font-size:9px}
 .integrityTable{min-width:1280px}
 .coverageBar{height:6px;background:#20314d;border-radius:99px;overflow:hidden;min-width:65px}.coverageBar>div{height:100%;background:#78a0ff}
+
+/* V5.6.2 mobile calibration UI */
+.mobileCards{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.miniCard{background:#091528;border:1px solid #273e63;border-radius:12px;padding:10px}
+.miniCard small{display:block;color:#95a7ca;margin-bottom:3px}
+.miniCard b{font-size:15px}
+.nearCard{background:#0b1729;border:1px solid #2b4368;border-radius:13px;padding:12px;margin-bottom:9px}
+.nearTop{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
+.nearTop strong{font-size:17px}
+.gapList{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.gapTag{display:inline-block;padding:4px 7px;border-radius:999px;border:1px solid #665632;background:#2e2715;color:#ffdf88;font-size:10px}
+.passTag{display:inline-block;padding:4px 7px;border-radius:999px;border:1px solid #2e6d5d;background:#102a25;color:#7de8c5;font-size:10px}
+.integrityDetail{font-size:10px;color:#9eb0d2;line-height:1.6}
+@media(max-width:800px){
+  .integrityTable{min-width:920px}
+  .scanTable{min-width:980px}
+  #closestGrid{grid-template-columns:1fr}
+}

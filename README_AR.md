@@ -1,88 +1,55 @@
-# Chart Trend Analyzer V5.6.1 — Anti-Manipulation & Market Integrity Engine
+# Chart Trend Analyzer V5.6.2 — Calibration Fix
 
-V5.6.1 تضيف طبقة مستقلة لاكتشاف مخاطر الشذوذ والتلاعب المحتمل قبل قبول أي مرشح من Market Scanner.
+## لماذا هذا التحديث؟
+V5.6 كان صارمًا، لكن الاختبار أظهر أن:
+- Abnormal Wick Density يظهر كثيرًا.
+- Extreme Long/Short Crowding قد يكون حساسًا جدًا.
+- Depth كرقم ثابت وحده غير كافٍ.
+- جداول الهاتف كانت واسعة.
+- نحتاج رؤية أقرب المرشحين حتى عند عدم وجود فرصة نهائية.
 
-## الفلاتر الأساسية
-- Top Market Cap
-- Binance USDT Spot only
-- 24h Quote Volume
-- Bid/Ask Spread
-- Stablecoin / leveraged-token exclusion
+## التحسينات
 
-## Market Integrity Engine
+### 1) ATR-normalized wick anomaly
+بدل عد الويكات الطويلة فقط:
+- يقيس wick ratio.
+- يقارن Range مع ATR.
+- يستخدم P90 داخل تاريخ العملة نفسه.
+- لا يعاقب العملة إلا إذا كان الويك غير طبيعي مقارنة بسلوكها التاريخي.
 
-### 1. Cross-source price validation
-يقارن عند توفر المصادر:
-- Binance
-- CoinGecko
-- Coinbase
+### 2) Fake breakouts adjusted by volatility
+يحسب تكرار الاختراقات الكاذبة ضمن سياق التذبذب بدل Threshold ثابت فقط.
 
-ويحسب Maximum Source Deviation.
-الافتراضي يمنع المرشح إذا كان الاختلاف أكبر من 0.75%.
+### 3) Volume rejection percentile
+لا يعتبر الحجم مرتفعًا لمجرد رقم ثابت؛ يستخدم 95th percentile من تاريخ العملة.
 
-### 2. Order-book depth
-يحسب قيمة Bid + Ask داخل ±0.5% من السعر الأوسط.
-الافتراضي:
-Minimum Depth = $500K.
+### 4) Derivatives percentiles
+Funding / Long-Short / OI:
+- يقارن القيمة الحالية بتاريخها الحديث.
+- يظهر flag فقط إذا كانت في المنطقة القصوى تقريبًا >95th percentile.
 
-### 3. Book imbalance
-يراقب الاختلال الشديد بين عمق الشراء والبيع.
-لا يستخدمه كإشارة شراء/بيع؛ يستخدمه فقط كمؤشر جودة/شذوذ.
+### 5) Relative Depth
+Depth الآن يقاس بطريقتين:
+- قيمة مطلقة داخل ±0.5%.
+- Depth / 24h Quote Volume.
+وبالتالي لا يعامل كل العملات بنفس الرقم الثابت فقط.
 
-### 4. Candle anomaly detector
-يراقب:
-- كثافة الويكات الطويلة
-- Volume + rejection spikes
-- repeated fake breakouts
-- price discontinuities
+### 6) Top 3 Closest Bullish / Bearish
+إذا لم توجد فرص نهائية:
+- يعرض أقرب 3 صاعدة.
+- أقرب 3 هابطة.
+- يوضح الشرط الناقص.
+- لا يعرض Entry/TP/Stop لهم.
 
-### 5. Derivatives crowding
-عند توفر Binance Futures:
-- Funding Rate crowding
-- Global Long/Short Ratio
-- Open Interest shock
+### 7) Mobile UI
+تقليل عرض جداول diagnostics وإضافة بطاقات مختصرة للمرشحين القريبين.
 
-هذه عوامل crowding وليست إثباتًا للتلاعب.
+## قاعدة Paper levels
+Paper Entry / TP1 / TP2 / Stop تظهر فقط في Strong Bullish / Strong Bearish بعد اجتياز كل الفلاتر النهائية.
 
-## Integrity Score
-0–100 منفصل تمامًا عن Technical Verification Score.
-
-الإعداد الافتراضي:
-- Minimum Integrity = 80
-- Minimum Integrity Coverage = 70%
-- Maximum cross-source deviation = 0.75%
-- Minimum depth ±0.5% = $500K
-
-Manipulation Risk = 100 - Integrity Score كقراءة مبسطة لمستوى الشذوذ.
-
-## Final qualification
-لا تظهر العملة في Strong Bullish / Strong Bearish إلا إذا اجتازت:
-1. Market Cap / liquidity / spread
-2. Technical Verification
-3. MTF
-4. Historical OOS
-5. Profit Factor
-6. Market Integrity
-7. Depth and provider-agreement checks
-
-## Paper Levels
-Paper Entry / TP1 / TP2 / Stop تبقى للمحاكاة البحثية فقط وليست توصيات تداول حقيقية.
-
-## تحديث GitHub Pages
-استبدل كل ملفات النسخة السابقة بملفات V5.6.1 ثم Commit.
-
+## التحديث
 افتح:
-https://YOURNAME.github.io/YOUR-REPO/?v=5.6
+https://YOURNAME.github.io/YOUR-REPO/?v=5.6.2
 
-والـScanner مباشرة:
-https://YOURNAME.github.io/YOUR-REPO/scanner.html?v=5.6
-
-
-## V5.6.1 Network Hotfix
-- Automatic retry for network requests.
-- Binance public API failover across multiple public hosts.
-- Longer mobile-friendly request timeouts.
-- Lower concurrent request count.
-- BTC/ETH context degrades to neutral instead of aborting the full scan.
-- Coinbase and derivatives data are optional; failures lower coverage rather than stopping the scan.
-- Browser AbortError is converted to a clear timeout/source error.
+والـScanner:
+https://YOURNAME.github.io/YOUR-REPO/scanner.html?v=5.6.2

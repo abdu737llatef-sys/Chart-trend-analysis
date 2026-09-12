@@ -1,7 +1,7 @@
 {
-  "name": "Chart Trend Analyzer V5.6.1",
-  "short_name": "Trend V5.6.1",
-  "start_url": "./?v=5.6.1",
+  "name": "Chart Trend Analyzer V5.6.2",
+  "short_name": "Trend V5.6.2",
+  "start_url": "./?v=5.6.2",
   "scope": "./",
   "display": "standalone",
   "background_color": "#06111f",

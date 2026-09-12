@@ -4,6 +4,21 @@ let scannerCancelled=false;
 const mean=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:0;
 const median=a=>{if(!a.length)return 0;const b=[...a].sort((x,y)=>x-y),m=Math.floor(b.length/2);return b.length%2?b[m]:(b[m-1]+b[m])/2;};
 const clamp=(x,a=0,b=100)=>Math.max(a,Math.min(b,x));
+
+const percentile=(arr,p)=>{
+  const a=arr.filter(Number.isFinite).sort((x,y)=>x-y);
+  if(!a.length)return null;
+  const idx=(a.length-1)*p,lo=Math.floor(idx),hi=Math.ceil(idx);
+  if(lo===hi)return a[lo];
+  return a[lo]+(a[hi]-a[lo])*(idx-lo);
+};
+const percentileRank=(arr,x)=>{
+  const a=arr.filter(Number.isFinite).sort((u,v)=>u-v);
+  if(!a.length||!Number.isFinite(x))return null;
+  let n=0;for(const v of a)if(v<=x)n++;
+  return n/a.length;
+};
+
 const esc=(s='')=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 const STABLES=new Set(['USDT','USDC','FDUSD','TUSD','DAI','USDE','USDS','PYUSD','BUSD','USD1','EUR','EURC']);
@@ -11,7 +26,7 @@ const FALLBACK_LARGE=['BTC','ETH','BNB','XRP','SOL','DOGE','ADA','TRX','AVAX','L
 const leveragedRe=/(UP|DOWN|BULL|BEAR|3L|3S)$/i;
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
-  const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.1',{updateViaCache:'none'});
+  const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.2',{updateViaCache:'none'});
   await reg.update();
 }catch(e){console.warn(e);}});
 
@@ -46,48 +61,14 @@ function barrierOutcome(cs,i,dir,atrv,h=12){
  return'timeout';
 }
 
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-const BINANCE_SPOT_BASES=[
- 'https://data-api.binance.vision',
- 'https://api.binance.com',
- 'https://api1.binance.com',
- 'https://api2.binance.com',
- 'https://api3.binance.com'
-];
-
-async function fetchJson(url,timeout=30000,retries=1){
- let lastErr=null;
- for(let attempt=0;attempt<=retries;attempt++){
-   const ctl=new AbortController();
-   const timer=setTimeout(()=>ctl.abort(),timeout);
-   try{
-     const r=await fetch(url,{signal:ctl.signal,cache:'no-store'});
-     if(!r.ok)throw new Error(`HTTP ${r.status}`);
-     return await r.json();
-   }catch(e){
-     const aborted=e?.name==='AbortError'||/aborted|abort/i.test(String(e?.message||''));
-     lastErr=new Error(aborted?'انتهت مهلة الاتصال بالمصدر':'تعذر الاتصال بالمصدر: '+(e?.message||e));
-     if(attempt<retries)await sleep(700*(attempt+1));
-   }finally{
-     clearTimeout(timer);
-   }
- }
- throw lastErr||new Error('تعذر الاتصال بالمصدر');
+async function fetchJson(url,timeout=18000){
+ const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),timeout);
+ try{const r=await fetch(url,{signal:ctl.signal,cache:'no-store'});if(!r.ok)throw new Error(`HTTP ${r.status}`);return await r.json();}
+ finally{clearTimeout(t);}
 }
-
-async function binanceSpotJson(path,timeout=28000){
- let last=null;
- for(const base of BINANCE_SPOT_BASES){
-   try{return await fetchJson(base+path,timeout,1);}
-   catch(e){last=e;}
- }
- throw new Error('تعذر الوصول إلى بيانات Binance العامة بعد عدة محاولات. '+(last?.message||''));
-}
-
 async function fetchKlines(symbol,interval,limit=360){
- const path=`/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${Math.min(limit,1000)}`;
- const d=await binanceSpotJson(path,30000);
- if(!Array.isArray(d))throw new Error('لم يتم استلام بيانات شموع صالحة');
+ const d=await fetchJson(`https://data-api.binance.vision/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${Math.min(limit,1000)}`);
+ if(!Array.isArray(d))throw new Error('No klines');
  return d.map(x=>({time:+x[0],open:+x[1],high:+x[2],low:+x[3],close:+x[4],volume:+x[5]}));
 }
 
@@ -106,9 +87,9 @@ async function getUniverse(){
 
 async function getBinanceSnapshot(){
  const [exchange,tickers,books]=await Promise.all([
-   binanceSpotJson('/api/v3/exchangeInfo',30000),
-   binanceSpotJson('/api/v3/ticker/24hr',30000),
-   binanceSpotJson('/api/v3/ticker/bookTicker',30000)
+   fetchJson('https://data-api.binance.vision/api/v3/exchangeInfo'),
+   fetchJson('https://data-api.binance.vision/api/v3/ticker/24hr'),
+   fetchJson('https://data-api.binance.vision/api/v3/ticker/bookTicker')
  ]);
  const allowed=new Set((exchange.symbols||[]).filter(x=>x.quoteAsset==='USDT'&&x.status==='TRADING'&&x.isSpotTradingAllowed!==false).map(x=>x.symbol));
  return{allowed,tmap:new Map((tickers||[]).map(x=>[x.symbol,x])),bmap:new Map((books||[]).map(x=>[x.symbol,x]))};
@@ -131,13 +112,8 @@ async function getMtf(symbol,baseTf,baseCandles){
 async function marketContexts(){
  const out={};
  for(const tf of ['15m','1h','1d']){
-   try{
-     const[b,e]=await Promise.all([fetchKlines('BTCUSDT',tf,400),fetchKlines('ETHUSDT',tf,400)]);
-     const ba=analyze(b),ea=analyze(e);
-     out[tf]={score:ba.score*.60+ea.score*.40,btc:ba.score,eth:ea.score,available:true};
-   }catch(e){
-     out[tf]={score:50,btc:50,eth:50,available:false,error:e.message};
-   }
+   const[b,e]=await Promise.all([fetchKlines('BTCUSDT',tf,400),fetchKlines('ETHUSDT',tf,400)]),ba=analyze(b),ea=analyze(e);
+   out[tf]={score:ba.score*.60+ea.score*.40,btc:ba.score,eth:ea.score};
  }
  return out;
 }
@@ -156,54 +132,105 @@ function paperLevels(a,side){
 // ---------------- MARKET INTEGRITY ENGINE ----------------
 
 async function fetchDepth(symbol){
- return await binanceSpotJson(`/api/v3/depth?symbol=${encodeURIComponent(symbol)}&limit=100`,25000);
+ return await fetchJson(`https://data-api.binance.vision/api/v3/depth?symbol=${encodeURIComponent(symbol)}&limit=100`,15000);
 }
-function depthIntegrity(depth,mid,minDepth){
+
+function depthIntegrity(depth,mid,minDepth,quoteVolume24h=0){
  if(!depth||!Array.isArray(depth.bids)||!Array.isArray(depth.asks)||!mid)return{available:false};
  const bidFloor=mid*.995,askCeil=mid*1.005;
  const bidDepth=depth.bids.reduce((s,x)=>{const p=+x[0],q=+x[1];return p>=bidFloor?s+p*q:s;},0);
  const askDepth=depth.asks.reduce((s,x)=>{const p=+x[0],q=+x[1];return p<=askCeil?s+p*q:s;},0);
- const total=bidDepth+askDepth,imb=total?Math.abs(bidDepth-askDepth)/total:1,ratio=minDepth?total/minDepth:0;
- const depthScore=ratio>=4?100:ratio>=2?92:ratio>=1?82:ratio>=.5?58:ratio>=.25?35:15;
- const balanceScore=imb<=.20?100:imb<=.35?88:imb<=.50?70:imb<=.65?45:20;
+ const total=bidDepth+askDepth,imb=total?Math.abs(bidDepth-askDepth)/total:1;
+ const absoluteRatio=minDepth?total/minDepth:0;
+ const depthToVolume=quoteVolume24h>0?total/quoteVolume24h:0;
+
+ const absScore=absoluteRatio>=4?100:absoluteRatio>=2?92:absoluteRatio>=1?82:absoluteRatio>=.5?58:absoluteRatio>=.25?35:15;
+ const relScore=depthToVolume>=.010?100:depthToVolume>=.005?92:depthToVolume>=.0025?80:depthToVolume>=.001?62:depthToVolume>=.0005?42:20;
+ const depthScore=absScore*.60+relScore*.40;
+ const balanceScore=imb<=.20?100:imb<=.35?90:imb<=.50?75:imb<=.65?52:28;
+
  const flags=[];
- if(total<minDepth)flags.push('Thin depth');
- if(imb>.65)flags.push('Extreme book imbalance');
- return{available:true,bidDepth,askDepth,total,imbalance:imb,depthScore,balanceScore,flags};
+ if(total<minDepth && depthToVolume<.001)flags.push('Thin depth vs liquidity');
+ if(imb>.72)flags.push('Extreme book imbalance');
+ return{available:true,bidDepth,askDepth,total,imbalance:imb,absoluteRatio,depthToVolume,depthScore,balanceScore,flags};
 }
 
+
 function candleIntegrity(cs){
- const recent=cs.slice(-80),vols=recent.map(x=>x.volume||0),medVol=median(vols.filter(x=>x>0));
- let rejections=0,fakeBreaks=0,spikeReject=0,gaps=0;
- for(let i=1;i<recent.length;i++){
-   const c=recent[i],range=c.high-c.low;
-   if(range<=0)continue;
+ const recent=cs.slice(-140);
+ if(recent.length<40)return{available:false,flags:['Insufficient candle history']};
+
+ const AT=atr(recent,14);
+ const vols=recent.map(x=>x.volume||0);
+ const volBase=vols.slice(0,-1);
+ const volP95=percentile(volBase,.95)||0;
+
+ const wickRatios=[],normRanges=[],bodyRatios=[];
+ for(let i=14;i<recent.length;i++){
+   const c=recent[i],range=c.high-c.low,atrv=AT[i];
+   if(!(range>0&&atrv>0))continue;
+   const body=Math.abs(c.close-c.open);
+   const upper=c.high-Math.max(c.open,c.close);
+   const lower=Math.min(c.open,c.close)-c.low;
+   wickRatios.push((upper+lower)/range);
+   normRanges.push(range/atrv);
+   bodyRatios.push(body/range);
+ }
+ const wickP90=percentile(wickRatios,.90)??.8;
+ const rangeP90=percentile(normRanges,.90)??2.2;
+
+ let abnormalWicks=0,fakeBreaks=0,spikeReject=0,gaps=0;
+ const fakeByRegime={low:0,mid:0,high:0};
+
+ for(let i=20;i<recent.length;i++){
+   const c=recent[i],range=c.high-c.low,atrv=AT[i];
+   if(!(range>0&&atrv>0))continue;
    const body=Math.abs(c.close-c.open),upper=c.high-Math.max(c.open,c.close),lower=Math.min(c.open,c.close)-c.low;
-   const wick=(upper+lower)/range,bodyRatio=body/range;
-   const rejection=wick>.72&&bodyRatio<.22;
-   if(rejection)rejections++;
-   if(rejection&&medVol>0&&c.volume>medVol*4)spikeReject++;
-   const gap=Math.abs(c.open-recent[i-1].close)/recent[i-1].close;
-   if(gap>.012)gaps++;
-   if(i>=20){
-     const prior=recent.slice(i-20,i);
-     const ph=Math.max(...prior.map(x=>x.high)),pl=Math.min(...prior.map(x=>x.low));
-     if((c.high>ph&&c.close<ph)||(c.low<pl&&c.close>pl))fakeBreaks++;
+   const wick=(upper+lower)/range,bodyRatio=body/range,normRange=range/atrv;
+   const abnormal=wick>Math.max(.78,wickP90)&&bodyRatio<.22&&normRange>Math.max(1.15,rangeP90*.70);
+   if(abnormal)abnormalWicks++;
+   if(abnormal&&volP95>0&&c.volume>=volP95)spikeReject++;
+
+   const prior=recent.slice(i-20,i),ph=Math.max(...prior.map(x=>x.high)),pl=Math.min(...prior.map(x=>x.low));
+   const broke=(c.high>ph&&c.close<ph)||(c.low<pl&&c.close>pl);
+   if(broke){
+     fakeBreaks++;
+     const rv=atrv/c.close;
+     if(rv<.008)fakeByRegime.low++;
+     else if(rv<.02)fakeByRegime.mid++;
+     else fakeByRegime.high++;
+   }
+
+   const prev=recent[i-1];
+   if(prev.close>0){
+     const openGap=Math.abs(c.open-prev.close)/prev.close;
+     if(openGap>Math.max(.015,1.25*atrv/prev.close))gaps++;
    }
  }
- let score=100-rejections*1.3-fakeBreaks*4-spikeReject*10-gaps*7;
+
+ const n=Math.max(1,recent.length-20);
+ const wickRate=abnormalWicks/n,fakeRate=fakeBreaks/n,spikeRate=spikeReject/n,gapRate=gaps/n;
+ let score=100;
+ score-=Math.min(28,wickRate*180);
+ score-=Math.min(32,fakeRate*220);
+ score-=Math.min(26,spikeRate*380);
+ score-=Math.min(22,gapRate*450);
  score=clamp(score);
+
  const flags=[];
- if(spikeReject>=1)flags.push('Volume rejection spike');
- if(fakeBreaks>=4)flags.push('Repeated fake breakouts');
- if(rejections>=12)flags.push('Abnormal wick density');
- if(gaps>=2)flags.push('Price discontinuity');
- return{available:true,score,rejections,fakeBreaks,spikeReject,gaps,flags};
+ if(wickRate>.11)flags.push('ATR-normalized wick anomaly');
+ if(fakeRate>.08)flags.push('Volatility-adjusted fake breakouts');
+ if(spikeRate>.025)flags.push('High-percentile volume rejection');
+ if(gapRate>.018)flags.push('Price discontinuity');
+ return{
+   available:true,score,abnormalWicks,fakeBreaks,spikeReject,gaps,
+   wickRate,fakeRate,spikeRate,gapRate,wickP90,rangeP90,fakeByRegime,flags
+ };
 }
 
 async function coinbaseSpot(base){
  try{
-   const d=await fetchJson(`https://api.coinbase.com/v2/prices/${encodeURIComponent(base)}-USD/spot`,18000,0);
+   const d=await fetchJson(`https://api.coinbase.com/v2/prices/${encodeURIComponent(base)}-USD/spot`,10000);
    const p=+(d?.data?.amount);
    return Number.isFinite(p)&&p>0?p:null;
  }catch{return null;}
@@ -223,34 +250,50 @@ async function crossSourceIntegrity(base,binancePrice,coinGeckoPrice,maxAllowed)
  return{available:true,sources,maxDeviation:maxDev,score:deviationScore(maxDev),flags};
 }
 
-async function derivativesIntegrity(symbol){
- const urls=[
-   `https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${encodeURIComponent(symbol)}`,
-   `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${encodeURIComponent(symbol)}&period=15m&limit=2`,
-   `https://fapi.binance.com/futures/data/openInterestHist?symbol=${encodeURIComponent(symbol)}&period=15m&limit=2`
- ];
- const r=await Promise.allSettled(urls.map(u=>fetchJson(u,18000,0)));
- const premium=r[0].status==='fulfilled'?r[0].value:null;
- const ls=r[1].status==='fulfilled'?r[1].value:null;
- const hist=r[2].status==='fulfilled'?r[2].value:null;
- if(!premium&&!ls&&!hist)return{available:false,flags:[]};
 
- const funding=premium?Math.abs((+premium.lastFundingRate||0)*100):null;
- const ratio=Array.isArray(ls)&&ls.length?+ls.at(-1).longShortRatio:null;
- let oiChange=null;
- if(Array.isArray(hist)&&hist.length>=2){
-   const a=+hist[0].sumOpenInterestValue,b=+hist.at(-1).sumOpenInterestValue;
-   if(a>0)oiChange=Math.abs(b/a-1)*100;
+async function derivativesIntegrity(symbol){
+ try{
+   const [premium,ls,hist,fundingHist]=await Promise.all([
+     fetchJson(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${encodeURIComponent(symbol)}`,10000),
+     fetchJson(`https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${encodeURIComponent(symbol)}&period=15m&limit=96`,10000),
+     fetchJson(`https://fapi.binance.com/futures/data/openInterestHist?symbol=${encodeURIComponent(symbol)}&period=15m&limit=96`,10000),
+     fetchJson(`https://fapi.binance.com/fapi/v1/fundingRate?symbol=${encodeURIComponent(symbol)}&limit=100`,10000)
+   ]);
+
+   const currentFunding=Math.abs((+premium.lastFundingRate||0)*100);
+   const fundingSeries=Array.isArray(fundingHist)?fundingHist.map(x=>Math.abs((+x.fundingRate||0)*100)).filter(Number.isFinite):[];
+   const fundingPct=percentileRank(fundingSeries,currentFunding);
+
+   const ratioSeries=Array.isArray(ls)?ls.map(x=>+x.longShortRatio).filter(x=>Number.isFinite(x)&&x>0):[];
+   const currentRatio=ratioSeries.at(-1)??null;
+   const logSeries=ratioSeries.map(x=>Math.abs(Math.log(x)));
+   const ratioExtreme=currentRatio?Math.abs(Math.log(currentRatio)):null;
+   const ratioPct=percentileRank(logSeries,ratioExtreme);
+
+   const oiVals=Array.isArray(hist)?hist.map(x=>+x.sumOpenInterestValue).filter(x=>Number.isFinite(x)&&x>0):[];
+   const oiChanges=[];
+   for(let i=1;i<oiVals.length;i++)oiChanges.push(Math.abs(oiVals[i]/oiVals[i-1]-1)*100);
+   const currentOiChange=oiChanges.at(-1)??null;
+   const oiPct=percentileRank(oiChanges,currentOiChange);
+
+   const pctScore=p=>p==null?null:(p<=.75?100:p<=.90?85:p<=.95?65:p<=.98?42:20);
+   const fs=pctScore(fundingPct),rs=pctScore(ratioPct),os=pctScore(oiPct);
+   const vals=[fs,rs,os].filter(Number.isFinite),score=vals.length?mean(vals):null;
+
+   const flags=[];
+   if(fundingPct!=null&&fundingPct>.95)flags.push('Funding >95th percentile');
+   if(ratioPct!=null&&ratioPct>.95)flags.push('Long/short crowding >95th percentile');
+   if(oiPct!=null&&oiPct>.95)flags.push('OI shock >95th percentile');
+
+   return{
+     available:vals.length>0,score:score??0,
+     funding:currentFunding,fundingPct,
+     ratio:currentRatio,ratioPct,
+     oiChange:currentOiChange,oiPct,flags
+   };
+ }catch{
+   return{available:false,flags:[]};
  }
- const fs=funding==null?null:(funding<=.03?100:funding<=.05?92:funding<=.10?70:funding<=.20?42:20);
- const rs=ratio==null?null:(ratio>=.75&&ratio<=1.33?100:ratio>=.60&&ratio<=1.67?82:ratio>=.50&&ratio<=2?60:30);
- const os=oiChange==null?null:(oiChange<=3?100:oiChange<=6?82:oiChange<=10?58:30);
- const vals=[fs,rs,os].filter(Number.isFinite),score=vals.length?mean(vals):null;
- const flags=[];
- if(funding!=null&&funding>.10)flags.push('Funding crowding');
- if(ratio!=null&&(ratio<.50||ratio>2))flags.push('Extreme long/short crowding');
- if(oiChange!=null&&oiChange>10)flags.push('Open-interest shock');
- return{available:vals.length>0,score,funding,ratio,oiChange,flags};
 }
 
 function spreadIntegrity(spread){
@@ -262,7 +305,7 @@ function spreadIntegrity(spread){
 async function integrityEngine(x,hist,cfg){
  const mid=x.a.price;
  const [depth,cross,deriv]=await Promise.all([
-   fetchDepth(x.pair).then(d=>depthIntegrity(d,mid,cfg.minDepth)).catch(()=>({available:false,flags:['Depth unavailable']})),
+   fetchDepth(x.pair).then(d=>depthIntegrity(d,mid,cfg.minDepth,x.quoteVolume)).catch(()=>({available:false,flags:['Depth unavailable']})),
    crossSourceIntegrity(x.symbol,mid,x.currentPrice,cfg.maxSourceDev),
    derivativesIntegrity(x.pair)
  ]);
@@ -285,7 +328,7 @@ async function integrityEngine(x,hist,cfg){
  const risk=100-score;
  const flags=[...new Set(components.flatMap(c=>c.d?.flags||[]))];
 
- const passDepth=depth.available&&depth.total>=cfg.minDepth;
+ const passDepth=depth.available&&(depth.total>=cfg.minDepth||depth.depthToVolume>=.0015);
  const passCross=!cross.available||cross.maxDeviation<=cfg.maxSourceDev;
  const pass=score>=cfg.minIntegrity&&coverage>=cfg.minCoverage&&passDepth&&passCross;
 
@@ -317,7 +360,7 @@ function rejectReason(x,cfg){
  if(x.validation.pf<cfg.minPF)a.push('PF');
  if(x.integrity.score<cfg.minIntegrity)a.push('Integrity');
  if(x.integrity.coverage<cfg.minCoverage)a.push('Integrity coverage');
- if(!x.integrity.depth.available||x.integrity.depth.total<cfg.minDepth)a.push('Thin depth');
+ if(!x.integrity.depth.available||(x.integrity.depth.total<cfg.minDepth&&x.integrity.depth.depthToVolume<.0015))a.push('Thin depth');
  if(x.integrity.cross.available&&x.integrity.cross.maxDeviation>cfg.maxSourceDev)a.push('Provider disagreement');
  return a.join(' / ')||'Qualified';
 }
@@ -349,7 +392,7 @@ function resultsTable(rows,side){
 function integrityTable(rows){
  if(!rows.length)return'<div class="muted">لا توجد بيانات.</div>';
  return`<table class="scanTable integrityTable"><thead><tr>
- <th>Coin</th><th>Integrity</th><th>Risk</th><th>Coverage</th><th>Depth</th><th>Book imbalance</th>
+ <th>Coin</th><th>Integrity</th><th>Risk</th><th>Coverage</th><th>Depth</th><th>Depth/Vol</th><th>Book imbalance</th>
  <th>Max source dev</th><th>Candle integrity</th><th>Derivatives</th><th>Flags</th>
  </tr></thead><tbody>${rows.map(x=>`<tr>
  <td class="coinCell">${esc(x.symbol)}</td>
@@ -357,6 +400,7 @@ function integrityTable(rows){
  <td class="${riskClass(x.integrity.risk)}">${x.integrity.risk.toFixed(1)}</td>
  <td>${Math.round(x.integrity.coverage*100)}%<div class="coverageBar"><div style="width:${Math.round(x.integrity.coverage*100)}%"></div></div></td>
  <td>${x.integrity.depth.available?usd(x.integrity.depth.total):'N/A'}</td>
+ <td>${x.integrity.depth.available?(x.integrity.depth.depthToVolume*100).toFixed(3)+'%':'N/A'}</td>
  <td>${x.integrity.depth.available?(x.integrity.depth.imbalance*100).toFixed(1)+'%':'N/A'}</td>
  <td>${x.integrity.cross.available?(x.integrity.cross.maxDeviation*100).toFixed(3)+'%':'N/A'}</td>
  <td>${x.integrity.candles.score.toFixed(0)}/100</td>
@@ -365,19 +409,51 @@ function integrityTable(rows){
  </tr>`).join('')}</tbody></table>`;
 }
 
+
+function closestCards(rows,side,cfg){
+ if(!rows.length)return'<div class="muted">لا توجد بيانات.</div>';
+ const arr=rows.filter(x=>x.side===side).map(x=>{
+   const gaps=[];
+   if(side===1&&x.verified<cfg.bullMin)gaps.push(`Technical ${x.verified.toFixed(1)} < ${cfg.bullMin}`);
+   if(side===-1&&x.verified>cfg.bearMax)gaps.push(`Technical ${x.verified.toFixed(1)} > ${cfg.bearMax}`);
+   if(x.validation.acc<cfg.minAcc)gaps.push(`OOS ${(x.validation.acc*100).toFixed(1)}%`);
+   if(x.validation.pf<cfg.minPF)gaps.push(`PF ${x.validation.pf.toFixed(2)}`);
+   if(x.integrity.score<cfg.minIntegrity)gaps.push(`Integrity ${x.integrity.score.toFixed(1)}`);
+   if(x.integrity.coverage<cfg.minCoverage)gaps.push(`Coverage ${Math.round(x.integrity.coverage*100)}%`);
+   const technicalDistance=side===1?Math.max(0,cfg.bullMin-x.verified):Math.max(0,x.verified-cfg.bearMax);
+   const accDistance=Math.max(0,cfg.minAcc-x.validation.acc)*100;
+   const pfDistance=Math.max(0,cfg.minPF-x.validation.pf)*10;
+   const intDistance=Math.max(0,cfg.minIntegrity-x.integrity.score);
+   const covDistance=Math.max(0,cfg.minCoverage-x.integrity.coverage)*100;
+   const distance=technicalDistance+accDistance+pfDistance+intDistance+covDistance;
+   return{...x,gaps,distance};
+ }).sort((a,b)=>a.distance-b.distance).slice(0,3);
+
+ return arr.map(x=>`<div class="nearCard">
+   <div class="nearTop"><strong>${esc(x.symbol)}</strong><span class="${side===1?'bullPill':'bearPill'} signalPill">${side===1?'Bullish':'Bearish'} ${x.verified.toFixed(1)}</span></div>
+   <div class="mobileCards">
+     <div class="miniCard"><small>Integrity</small><b class="${integrityClass(x.integrity.score)}">${x.integrity.score.toFixed(1)}</b></div>
+     <div class="miniCard"><small>OOS</small><b>${(x.validation.acc*100).toFixed(1)}%</b></div>
+     <div class="miniCard"><small>PF</small><b>${x.validation.pf.toFixed(2)}</b></div>
+     <div class="miniCard"><small>MTF</small><b>${x.mtf.toFixed(1)}</b></div>
+   </div>
+   <div class="gapList">${x.gaps.length?x.gaps.map(g=>`<span class="gapTag">${esc(g)}</span>`).join(''):'<span class="passTag">Passed all — should appear in final list</span>'}</div>
+ </div>`).join('');
+}
+
 function nearTable(rows){
  if(!rows.length)return'<div class="muted">لا توجد بيانات تشخيصية.</div>';
  return`<table class="scanTable"><thead><tr><th>Coin</th><th>Side</th><th>Verification</th><th>Integrity</th><th>OOS</th><th>PF</th><th>Rejected because</th></tr></thead>
  <tbody>${rows.slice(0,16).map(x=>`<tr><td class="coinCell">${esc(x.symbol)}</td><td>${x.side===1?'Bullish':'Bearish'}</td><td>${x.verified.toFixed(1)}</td><td class="${integrityClass(x.integrity.score)}">${x.integrity.score.toFixed(1)}</td><td>${(x.validation.acc*100).toFixed(1)}%</td><td>${x.validation.pf.toFixed(2)}</td><td>${esc(x.reason)}</td></tr>`).join('')}</tbody></table>`;
 }
 
-window.openFull=symbol=>{location.href=`./?v=5.6.1&symbol=${encodeURIComponent(symbol)}`;};
+window.openFull=symbol=>{location.href=`./?v=5.6&symbol=${encodeURIComponent(symbol)}`;};
 
 $('cancelScannerBtn').onclick=()=>{scannerCancelled=true;$('status').textContent='تم طلب الإيقاف؛ سيتوقف بعد انتهاء الطلبات الجارية.';};
 
 $('runScannerBtn').onclick=async()=>{
  const btn=$('runScannerBtn');btn.disabled=true;scannerCancelled=false;$('cancelScannerBtn').classList.remove('hidden');
- ['scannerSummary','bullishCard','bearishCard','integrityCard','nearMissCard'].forEach(id=>$(id).classList.add('hidden'));
+ ['scannerSummary','bullishCard','bearishCard','closestGrid','integrityCard','nearMissCard'].forEach(id=>$(id).classList.add('hidden'));
 
  const cfg={
    tf:$('scanTf').value,topRank:+$('scanTopRank').value,minCap:+$('scanMinCap').value,minVol:+$('scanMinVol').value,
@@ -388,11 +464,7 @@ $('runScannerBtn').onclick=async()=>{
 
  try{
    $('status').textContent='Stage 1/4: تحميل القيمة السوقية والسيولة والسبريد...';
-   const u=await getUniverse();
-   let snap;
-   try{snap=await getBinanceSnapshot();}
-   catch(e){throw new Error('فشل الاتصال ببيانات Binance العامة. تحقق من الإنترنت ثم أعد المحاولة. '+e.message);}
-   const ctx=await marketContexts();
+   const [u,snap,ctx]=await Promise.all([getUniverse(),getBinanceSnapshot(),marketContexts()]);
 
    let candidates=[];
    for(const c of u.coins){
@@ -409,7 +481,7 @@ $('runScannerBtn').onclick=async()=>{
    const deep=candidates.slice(0,Math.min(40,candidates.length));
 
    let done=0;
-   const initial=await mapLimit(deep,3,async c=>{
+   const initial=await mapLimit(deep,5,async c=>{
      const cs=await fetchKlines(c.pair,cfg.tf,360),a=analyze(cs);
      done++;progress(done,deep.length,'Stage 2/4: التحليل الفني الأولي');
      return{...c,base:cs,a,raw:a.score};
@@ -422,7 +494,7 @@ $('runScannerBtn').onclick=async()=>{
    const finalists=[...new Map([...bullPool,...bearPool].map(x=>[x.pair,x])).values()];
 
    done=0;
-   const final=await mapLimit(finalists,2,async x=>{
+   const final=await mapLimit(finalists,3,async x=>{
      const mtf=await getMtf(x.pair,cfg.tf,x.base);
      const side=x.raw>=50?1:-1;
      const hist=await fetchKlines(x.pair,cfg.tf,900);
@@ -448,10 +520,10 @@ $('runScannerBtn').onclick=async()=>{
    const near=good.filter(x=>!q.has(x.pair)).map(x=>({...x,reason:rejectReason(x,cfg)}))
      .sort((a,b)=>b.integrity.score-a.integrity.score||Math.abs(b.verified-50)-Math.abs(a.verified-50));
 
-   ['scannerSummary','bullishCard','bearishCard','integrityCard','nearMissCard'].forEach(id=>$(id).classList.remove('hidden'));
+   ['scannerSummary','bullishCard','bearishCard','closestGrid','integrityCard','nearMissCard'].forEach(id=>$(id).classList.remove('hidden'));
 
    const lowIntegrity=good.filter(x=>!x.integrity.pass).length;
-   $('scannerSummary').innerHTML=`<h2>V5.6.1 Scanner Summary</h2><div class="metrics">
+   $('scannerSummary').innerHTML=`<h2>V5.6.2 Scanner Summary</h2><div class="metrics">
      ${metric('Market-cap source',esc(u.source))}
      ${metric('Eligible universe',candidates.length)}
      ${metric('Deep-scanned',deep.length)}
@@ -465,9 +537,11 @@ $('runScannerBtn').onclick=async()=>{
    $('bullishTable').innerHTML=resultsTable(bulls,1);
    $('bearishTable').innerHTML=resultsTable(bears,-1);
    $('integrityTable').innerHTML=integrityTable([...good].sort((a,b)=>a.integrity.score-b.integrity.score));
+   $('closestBullishTable').innerHTML=closestCards(good,1,cfg);
+   $('closestBearishTable').innerHTML=closestCards(good,-1,cfg);
    $('nearMissTable').innerHTML=nearTable(near);
 
-   $('status').textContent=`Stage 4/4 complete: ${bulls.length} Bullish و${bears.length} Bearish اجتازوا جميع فلاتر V5.6.`;
+   $('status').textContent=`Stage 4/4 complete: ${bulls.length} Bullish و${bears.length} Bearish اجتازوا جميع فلاتر V5.6.2.`;
  }catch(e){
    $('status').textContent=e.message==='Scan cancelled'?'تم إيقاف الفحص.':'خطأ أثناء الفحص: '+e.message;
  }finally{
