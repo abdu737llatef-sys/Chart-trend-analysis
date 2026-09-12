@@ -2,7 +2,7 @@ const $=id=>document.getElementById(id);
 let deferredPrompt=null,currentLive=null,currentTf='H1';
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
- const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.4.0',{updateViaCache:'none'}); await reg.update();
+ const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.0',{updateViaCache:'none'}); await reg.update();
 }catch(e){console.warn(e);}});
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('installBtn').classList.remove('hidden');});
 $('installBtn').onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('installBtn').classList.add('hidden');};
@@ -108,3 +108,15 @@ function renderTf(){
  $('tfIndicators').innerHTML=`<h2>Indicators</h2><div class="metrics">${metric('EMA20',fmt(a.ema20,6))}${metric('EMA50',fmt(a.ema50,6))}${metric('EMA200',fmt(a.ema200,6))}${metric('RSI14',a.rsi.toFixed(2))}${metric('ADX14',a.adx.toFixed(2))}${metric('MACD',fmt(a.macd,6))}${metric('MACD Signal',fmt(a.macdSignal,6))}${metric('Volume/MA20',a.volumeRatio.toFixed(2)+'x')}</div>`;
 }
 $('runResearchBtn').onclick=async()=>{$('researchPanel').classList.remove('hidden');$('status').textContent='Research mode في V5.4 مبسط؛ استخدم V5.3 للبحث التفصيلي.';$('researchSummary').innerHTML='<h2>Research Mode</h2><p>V5.4 يركز على التحليل المباشر متعدد الفريمات.</p>';$('researchSides').innerHTML='';$('researchCalibration').innerHTML='';};
+
+
+// V5.6: open a symbol from Market Scanner in the Live MTF analyzer.
+window.addEventListener('load',()=>{
+  try{
+    const sym=new URLSearchParams(location.search).get('symbol');
+    if(sym && document.getElementById('liveSymbol')){
+      document.getElementById('liveSymbol').value=sym.toUpperCase();
+      setTimeout(()=>document.getElementById('runLiveBtn')?.click(),250);
+    }
+  }catch(e){}
+});

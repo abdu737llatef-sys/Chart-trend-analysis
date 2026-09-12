@@ -38,3 +38,20 @@ table{width:100%;border-collapse:collapse;min-width:760px}th,td{padding:9px 8px;
 .allow{background:#0e2b28;border:1px solid #327a69;color:#69e9c0}.block{background:#2c1821;border:1px solid #7d3449;color:#ff9dac}
 .levels4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.evidencegrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
 @media(max-width:800px){.mtfgrid{grid-template-columns:1fr}.levels4{grid-template-columns:1fr 1fr}.evidencegrid{grid-template-columns:1fr}}
+.scannerLaunch{display:flex;justify-content:space-between;gap:12px;align-items:center}
+.scannerLaunchBtn,.backBtn{display:inline-block;text-decoration:none;background:#eef3ff;color:#06101f;padding:12px 14px;border-radius:12px;font-weight:900}
+.secondary{width:100%;margin-top:8px;background:#162945;color:#d8e5ff;border:1px solid #35527e}
+.sectionTitle{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.signalPill{padding:7px 10px;border-radius:999px;font-weight:900;font-size:12px}
+.bullPill{background:#123e36;color:#72efc6;border:1px solid #2e826d}.bearPill{background:#3b1e29;color:#ff9dac;border:1px solid #7f3449}
+.scanTable{min-width:1180px}.scanTable td,.scanTable th{white-space:nowrap}.score90{color:#69e9c0;font-weight:900}.score10{color:#ff9dac;font-weight:900}
+.coinCell{font-weight:900;font-size:14px}.rankTag{font-size:10px;color:#95a7ca}.analyzeBtn{padding:7px 9px;font-size:11px;background:#dce8ff;color:#07111f}
+.progressbar{height:10px;background:#1d304e;border-radius:99px;overflow:hidden;margin-top:8px}.progressbar>div{height:100%;background:#82a5ff;transition:width .2s}
+@media(max-width:800px){.scannerLaunch,.sectionTitle{display:block}.scannerLaunchBtn,.backBtn{margin-top:10px;text-align:center;width:100%}}
+
+.integrityGood{color:#69e9c0;font-weight:900}.integrityMid{color:#ffda7d;font-weight:900}.integrityBad{color:#ff9dac;font-weight:900}
+.riskLow{color:#69e9c0;font-weight:900}.riskMid{color:#ffda7d;font-weight:900}.riskHigh{color:#ff9dac;font-weight:900}
+.flag{display:inline-block;margin:2px;padding:3px 6px;border-radius:999px;border:1px solid #5a4561;background:#221827;color:#ffc0cb;font-size:9px}
+.okflag{display:inline-block;margin:2px;padding:3px 6px;border-radius:999px;border:1px solid #286858;background:#102924;color:#86eccd;font-size:9px}
+.integrityTable{min-width:1280px}
+.coverageBar{height:6px;background:#20314d;border-radius:99px;overflow:hidden;min-width:65px}.coverageBar>div{height:100%;background:#78a0ff}

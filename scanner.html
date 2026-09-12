@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#06111f">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Crypto Market Scanner V5.6</title>
+  <link rel="manifest" href="manifest.webmanifest?v=5.6.0">
+  <link rel="icon" href="icon-192.png">
+  <link rel="stylesheet" href="style.css?v=5.6.0">
+</head>
+<body>
+<main class="wrap">
+  <header class="topbar">
+    <div>
+      <h1>Crypto Market Scanner <span>V5.6</span></h1>
+      <p>Anti‑Manipulation • Market Integrity • Cross‑Source • Depth • MTF • OOS</p>
+    </div>
+    <a class="backBtn" href="./?v=5.6">← المحلل الرئيسي</a>
+  </header>
+
+  <section class="card">
+    <h2>إعدادات فحص السوق</h2>
+    <div class="formgrid">
+      <label>فريم الفرصة
+        <select id="scanTf"><option value="15m">M15</option><option value="1h" selected>H1</option><option value="1d">D1</option></select>
+      </label>
+      <label>نطاق القيمة السوقية
+        <select id="scanTopRank"><option value="25">Top 25</option><option value="50" selected>Top 50</option><option value="100">Top 100</option></select>
+      </label>
+      <label>أقل Market Cap
+        <select id="scanMinCap"><option value="500000000">$500M</option><option value="1000000000" selected>$1B</option><option value="3000000000">$3B</option><option value="10000000000">$10B</option></select>
+      </label>
+      <label>أقل Volume 24h
+        <select id="scanMinVol"><option value="50000000">$50M</option><option value="100000000" selected>$100M</option><option value="250000000">$250M</option><option value="500000000">$500M</option></select>
+      </label>
+      <label>أقصى Spread
+        <select id="scanMaxSpread"><option value="0.0020">0.20%</option><option value="0.0015" selected>0.15%</option><option value="0.0010">0.10%</option><option value="0.0005">0.05%</option></select>
+      </label>
+      <label>أقل Depth ±0.5%
+        <select id="scanMinDepth"><option value="100000">$100K</option><option value="250000">$250K</option><option value="500000" selected>$500K</option><option value="1000000">$1M</option><option value="2000000">$2M</option></select>
+      </label>
+      <label>أقل Market Integrity
+        <select id="scanMinIntegrity"><option value="70">70/100</option><option value="75">75/100</option><option value="80" selected>80/100</option><option value="85">85/100</option><option value="90">90/100</option></select>
+      </label>
+      <label>أقل Integrity Coverage
+        <select id="scanMinCoverage"><option value="0.50">50%</option><option value="0.60">60%</option><option value="0.70" selected>70%</option><option value="0.80">80%</option></select>
+      </label>
+      <label>أقصى اختلاف بين المصادر
+        <select id="scanMaxSourceDev"><option value="0.005">0.50%</option><option value="0.0075" selected>0.75%</option><option value="0.010">1.00%</option><option value="0.015">1.50%</option></select>
+      </label>
+      <label>أقصى نتائج لكل جدول
+        <select id="scanMaxResults"><option value="5">5</option><option value="8" selected>8</option><option value="10">10</option></select>
+      </label>
+      <label>Bull Verification Score
+        <select id="scanBullMin"><option value="85">≥ 85</option><option value="90" selected>≥ 90</option><option value="95">≥ 95</option></select>
+      </label>
+      <label>Bear Verification Score
+        <select id="scanBearMax"><option value="15">≤ 15</option><option value="10" selected>≤ 10</option><option value="5">≤ 5</option></select>
+      </label>
+      <label>أقل OOS accuracy
+        <select id="scanMinAcc"><option value="0.52">52%</option><option value="0.55" selected>55%</option><option value="0.58">58%</option><option value="0.60">60%</option></select>
+      </label>
+      <label>أقل OOS Profit Factor
+        <select id="scanMinPF"><option value="1">1.00</option><option value="1.10" selected>1.10</option><option value="1.20">1.20</option><option value="1.30">1.30</option></select>
+      </label>
+    </div>
+
+    <button id="runScannerBtn" class="primary">فحص السوق + Integrity Guard</button>
+    <button id="cancelScannerBtn" class="secondary hidden">إلغاء الفحص</button>
+
+    <div class="note warn">
+      <b>قاعدة V5.6:</b> لا يكفي Verification Score قوي. المرشح النهائي يجب أن يجتاز أيضًا OOS وProfit Factor وMarket Integrity.
+      كلمة “Manipulation Risk” تعني مؤشرات شذوذ في السيولة/البيانات/السلوك، وليست اتهامًا بوجود تلاعب مؤكد.
+    </div>
+  </section>
+
+  <div id="status"></div>
+  <section id="scannerSummary" class="card hidden"></section>
+
+  <section id="bullishCard" class="card hidden">
+    <div class="sectionTitle">
+      <div><h2>Strong Bullish — Integrity Verified</h2><p class="muted">Technical + OOS + liquidity + cross‑source + depth + anomaly guard.</p></div>
+      <span class="signalPill bullPill">BULLISH</span>
+    </div>
+    <div id="bullishTable" class="tablewrap"></div>
+  </section>
+
+  <section id="bearishCard" class="card hidden">
+    <div class="sectionTitle">
+      <div><h2>Strong Bearish — Integrity Verified</h2><p class="muted">Technical + OOS + liquidity + cross‑source + depth + anomaly guard.</p></div>
+      <span class="signalPill bearPill">BEARISH</span>
+    </div>
+    <div id="bearishTable" class="tablewrap"></div>
+  </section>
+
+  <section id="integrityCard" class="card hidden">
+    <h2>Market Integrity Diagnostics</h2>
+    <p class="muted">يعرض جودة البيانات والسيولة ومؤشرات الشذوذ للمرشحين النهائيين. انخفاض الدرجة يحجب العملة حتى لو كان التحليل الفني قويًا.</p>
+    <div id="integrityTable" class="tablewrap"></div>
+  </section>
+
+  <section id="nearMissCard" class="card hidden">
+    <h2>Rejected / Near‑Qualified</h2>
+    <p class="muted">ليست فرصًا. هذه القائمة تشرح سبب الرفض: Technical أو OOS أو السيولة أو Integrity.</p>
+    <div id="nearMissTable" class="tablewrap"></div>
+  </section>
+
+  <section class="card">
+    <h2>Market Integrity Engine</h2>
+    <div class="chips">
+      <span>Binance vs CoinGecko</span><span>Coinbase spot when available</span>
+      <span>Bid/Ask Spread</span><span>Depth ±0.5%</span><span>Order‑book Imbalance</span>
+      <span>Abnormal Wicks</span><span>Fake Breakout Frequency</span><span>Volume‑Rejection Spikes</span>
+      <span>Funding Crowding</span><span>Long/Short Crowding</span><span>OI Shock</span>
+      <span>Integrity Coverage</span><span>No Forced Signal</span>
+    </div>
+    <p class="muted">لا توجد أداة تستطيع إثبات غياب التلاعب. هذه الطبقة تقلل الاعتماد على مصدر واحد وتمنع الحالات ذات الشذوذ الواضح من الوصول إلى القوائم النهائية.</p>
+  </section>
+</main>
+<script src="scanner.js?v=5.6.0"></script>
+</body>
+</html>
