@@ -1,6 +1,6 @@
-# Chart Trend Analyzer V5.6 — Anti-Manipulation & Market Integrity Engine
+# Chart Trend Analyzer V5.6.1 — Anti-Manipulation & Market Integrity Engine
 
-V5.6 تضيف طبقة مستقلة لاكتشاف مخاطر الشذوذ والتلاعب المحتمل قبل قبول أي مرشح من Market Scanner.
+V5.6.1 تضيف طبقة مستقلة لاكتشاف مخاطر الشذوذ والتلاعب المحتمل قبل قبول أي مرشح من Market Scanner.
 
 ## الفلاتر الأساسية
 - Top Market Cap
@@ -69,10 +69,20 @@ Manipulation Risk = 100 - Integrity Score كقراءة مبسطة لمستوى �
 Paper Entry / TP1 / TP2 / Stop تبقى للمحاكاة البحثية فقط وليست توصيات تداول حقيقية.
 
 ## تحديث GitHub Pages
-استبدل كل ملفات النسخة السابقة بملفات V5.6 ثم Commit.
+استبدل كل ملفات النسخة السابقة بملفات V5.6.1 ثم Commit.
 
 افتح:
 https://YOURNAME.github.io/YOUR-REPO/?v=5.6
 
 والـScanner مباشرة:
 https://YOURNAME.github.io/YOUR-REPO/scanner.html?v=5.6
+
+
+## V5.6.1 Network Hotfix
+- Automatic retry for network requests.
+- Binance public API failover across multiple public hosts.
+- Longer mobile-friendly request timeouts.
+- Lower concurrent request count.
+- BTC/ETH context degrades to neutral instead of aborting the full scan.
+- Coinbase and derivatives data are optional; failures lower coverage rather than stopping the scan.
+- Browser AbortError is converted to a clear timeout/source error.

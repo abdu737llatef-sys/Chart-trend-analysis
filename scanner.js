@@ -11,7 +11,7 @@ const FALLBACK_LARGE=['BTC','ETH','BNB','XRP','SOL','DOGE','ADA','TRX','AVAX','L
 const leveragedRe=/(UP|DOWN|BULL|BEAR|3L|3S)$/i;
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
-  const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.0',{updateViaCache:'none'});
+  const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.1',{updateViaCache:'none'});
   await reg.update();
 }catch(e){console.warn(e);}});
 
@@ -46,14 +46,48 @@ function barrierOutcome(cs,i,dir,atrv,h=12){
  return'timeout';
 }
 
-async function fetchJson(url,timeout=18000){
- const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),timeout);
- try{const r=await fetch(url,{signal:ctl.signal,cache:'no-store'});if(!r.ok)throw new Error(`HTTP ${r.status}`);return await r.json();}
- finally{clearTimeout(t);}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const BINANCE_SPOT_BASES=[
+ 'https://data-api.binance.vision',
+ 'https://api.binance.com',
+ 'https://api1.binance.com',
+ 'https://api2.binance.com',
+ 'https://api3.binance.com'
+];
+
+async function fetchJson(url,timeout=30000,retries=1){
+ let lastErr=null;
+ for(let attempt=0;attempt<=retries;attempt++){
+   const ctl=new AbortController();
+   const timer=setTimeout(()=>ctl.abort(),timeout);
+   try{
+     const r=await fetch(url,{signal:ctl.signal,cache:'no-store'});
+     if(!r.ok)throw new Error(`HTTP ${r.status}`);
+     return await r.json();
+   }catch(e){
+     const aborted=e?.name==='AbortError'||/aborted|abort/i.test(String(e?.message||''));
+     lastErr=new Error(aborted?'انتهت مهلة الاتصال بالمصدر':'تعذر الاتصال بالمصدر: '+(e?.message||e));
+     if(attempt<retries)await sleep(700*(attempt+1));
+   }finally{
+     clearTimeout(timer);
+   }
+ }
+ throw lastErr||new Error('تعذر الاتصال بالمصدر');
 }
+
+async function binanceSpotJson(path,timeout=28000){
+ let last=null;
+ for(const base of BINANCE_SPOT_BASES){
+   try{return await fetchJson(base+path,timeout,1);}
+   catch(e){last=e;}
+ }
+ throw new Error('تعذر الوصول إلى بيانات Binance العامة بعد عدة محاولات. '+(last?.message||''));
+}
+
 async function fetchKlines(symbol,interval,limit=360){
- const d=await fetchJson(`https://data-api.binance.vision/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${Math.min(limit,1000)}`);
- if(!Array.isArray(d))throw new Error('No klines');
+ const path=`/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${Math.min(limit,1000)}`;
+ const d=await binanceSpotJson(path,30000);
+ if(!Array.isArray(d))throw new Error('لم يتم استلام بيانات شموع صالحة');
  return d.map(x=>({time:+x[0],open:+x[1],high:+x[2],low:+x[3],close:+x[4],volume:+x[5]}));
 }
 
@@ -72,9 +106,9 @@ async function getUniverse(){
 
 async function getBinanceSnapshot(){
  const [exchange,tickers,books]=await Promise.all([
-   fetchJson('https://data-api.binance.vision/api/v3/exchangeInfo'),
-   fetchJson('https://data-api.binance.vision/api/v3/ticker/24hr'),
-   fetchJson('https://data-api.binance.vision/api/v3/ticker/bookTicker')
+   binanceSpotJson('/api/v3/exchangeInfo',30000),
+   binanceSpotJson('/api/v3/ticker/24hr',30000),
+   binanceSpotJson('/api/v3/ticker/bookTicker',30000)
  ]);
  const allowed=new Set((exchange.symbols||[]).filter(x=>x.quoteAsset==='USDT'&&x.status==='TRADING'&&x.isSpotTradingAllowed!==false).map(x=>x.symbol));
  return{allowed,tmap:new Map((tickers||[]).map(x=>[x.symbol,x])),bmap:new Map((books||[]).map(x=>[x.symbol,x]))};
@@ -97,8 +131,13 @@ async function getMtf(symbol,baseTf,baseCandles){
 async function marketContexts(){
  const out={};
  for(const tf of ['15m','1h','1d']){
-   const[b,e]=await Promise.all([fetchKlines('BTCUSDT',tf,400),fetchKlines('ETHUSDT',tf,400)]),ba=analyze(b),ea=analyze(e);
-   out[tf]={score:ba.score*.60+ea.score*.40,btc:ba.score,eth:ea.score};
+   try{
+     const[b,e]=await Promise.all([fetchKlines('BTCUSDT',tf,400),fetchKlines('ETHUSDT',tf,400)]);
+     const ba=analyze(b),ea=analyze(e);
+     out[tf]={score:ba.score*.60+ea.score*.40,btc:ba.score,eth:ea.score,available:true};
+   }catch(e){
+     out[tf]={score:50,btc:50,eth:50,available:false,error:e.message};
+   }
  }
  return out;
 }
@@ -117,7 +156,7 @@ function paperLevels(a,side){
 // ---------------- MARKET INTEGRITY ENGINE ----------------
 
 async function fetchDepth(symbol){
- return await fetchJson(`https://data-api.binance.vision/api/v3/depth?symbol=${encodeURIComponent(symbol)}&limit=100`,15000);
+ return await binanceSpotJson(`/api/v3/depth?symbol=${encodeURIComponent(symbol)}&limit=100`,25000);
 }
 function depthIntegrity(depth,mid,minDepth){
  if(!depth||!Array.isArray(depth.bids)||!Array.isArray(depth.asks)||!mid)return{available:false};
@@ -164,7 +203,7 @@ function candleIntegrity(cs){
 
 async function coinbaseSpot(base){
  try{
-   const d=await fetchJson(`https://api.coinbase.com/v2/prices/${encodeURIComponent(base)}-USD/spot`,10000);
+   const d=await fetchJson(`https://api.coinbase.com/v2/prices/${encodeURIComponent(base)}-USD/spot`,18000,0);
    const p=+(d?.data?.amount);
    return Number.isFinite(p)&&p>0?p:null;
  }catch{return null;}
@@ -185,31 +224,33 @@ async function crossSourceIntegrity(base,binancePrice,coinGeckoPrice,maxAllowed)
 }
 
 async function derivativesIntegrity(symbol){
- try{
-   const [premium,ls,hist]=await Promise.all([
-     fetchJson(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${encodeURIComponent(symbol)}`,10000),
-     fetchJson(`https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${encodeURIComponent(symbol)}&period=15m&limit=2`,10000),
-     fetchJson(`https://fapi.binance.com/futures/data/openInterestHist?symbol=${encodeURIComponent(symbol)}&period=15m&limit=2`,10000)
-   ]);
-   const funding=Math.abs((+premium.lastFundingRate||0)*100);
-   const ratio=Array.isArray(ls)&&ls.length?+ls.at(-1).longShortRatio:null;
-   let oiChange=null;
-   if(Array.isArray(hist)&&hist.length>=2){
-     const a=+hist[0].sumOpenInterestValue,b=+hist.at(-1).sumOpenInterestValue;
-     if(a>0)oiChange=Math.abs(b/a-1)*100;
-   }
-   const fs=funding<=.03?100:funding<=.05?92:funding<=.10?70:funding<=.20?42:20;
-   const rs=ratio==null?null:(ratio>=.75&&ratio<=1.33?100:ratio>=.60&&ratio<=1.67?82:ratio>=.50&&ratio<=2?60:30);
-   const os=oiChange==null?null:(oiChange<=3?100:oiChange<=6?82:oiChange<=10?58:30);
-   const vals=[fs,rs,os].filter(Number.isFinite),score=mean(vals);
-   const flags=[];
-   if(funding>.10)flags.push('Funding crowding');
-   if(ratio!=null&&(ratio<.50||ratio>2))flags.push('Extreme long/short crowding');
-   if(oiChange!=null&&oiChange>10)flags.push('Open-interest shock');
-   return{available:true,score,funding,ratio,oiChange,flags};
- }catch{
-   return{available:false,flags:[]};
+ const urls=[
+   `https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${encodeURIComponent(symbol)}`,
+   `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${encodeURIComponent(symbol)}&period=15m&limit=2`,
+   `https://fapi.binance.com/futures/data/openInterestHist?symbol=${encodeURIComponent(symbol)}&period=15m&limit=2`
+ ];
+ const r=await Promise.allSettled(urls.map(u=>fetchJson(u,18000,0)));
+ const premium=r[0].status==='fulfilled'?r[0].value:null;
+ const ls=r[1].status==='fulfilled'?r[1].value:null;
+ const hist=r[2].status==='fulfilled'?r[2].value:null;
+ if(!premium&&!ls&&!hist)return{available:false,flags:[]};
+
+ const funding=premium?Math.abs((+premium.lastFundingRate||0)*100):null;
+ const ratio=Array.isArray(ls)&&ls.length?+ls.at(-1).longShortRatio:null;
+ let oiChange=null;
+ if(Array.isArray(hist)&&hist.length>=2){
+   const a=+hist[0].sumOpenInterestValue,b=+hist.at(-1).sumOpenInterestValue;
+   if(a>0)oiChange=Math.abs(b/a-1)*100;
  }
+ const fs=funding==null?null:(funding<=.03?100:funding<=.05?92:funding<=.10?70:funding<=.20?42:20);
+ const rs=ratio==null?null:(ratio>=.75&&ratio<=1.33?100:ratio>=.60&&ratio<=1.67?82:ratio>=.50&&ratio<=2?60:30);
+ const os=oiChange==null?null:(oiChange<=3?100:oiChange<=6?82:oiChange<=10?58:30);
+ const vals=[fs,rs,os].filter(Number.isFinite),score=vals.length?mean(vals):null;
+ const flags=[];
+ if(funding!=null&&funding>.10)flags.push('Funding crowding');
+ if(ratio!=null&&(ratio<.50||ratio>2))flags.push('Extreme long/short crowding');
+ if(oiChange!=null&&oiChange>10)flags.push('Open-interest shock');
+ return{available:vals.length>0,score,funding,ratio,oiChange,flags};
 }
 
 function spreadIntegrity(spread){
@@ -330,7 +371,7 @@ function nearTable(rows){
  <tbody>${rows.slice(0,16).map(x=>`<tr><td class="coinCell">${esc(x.symbol)}</td><td>${x.side===1?'Bullish':'Bearish'}</td><td>${x.verified.toFixed(1)}</td><td class="${integrityClass(x.integrity.score)}">${x.integrity.score.toFixed(1)}</td><td>${(x.validation.acc*100).toFixed(1)}%</td><td>${x.validation.pf.toFixed(2)}</td><td>${esc(x.reason)}</td></tr>`).join('')}</tbody></table>`;
 }
 
-window.openFull=symbol=>{location.href=`./?v=5.6&symbol=${encodeURIComponent(symbol)}`;};
+window.openFull=symbol=>{location.href=`./?v=5.6.1&symbol=${encodeURIComponent(symbol)}`;};
 
 $('cancelScannerBtn').onclick=()=>{scannerCancelled=true;$('status').textContent='تم طلب الإيقاف؛ سيتوقف بعد انتهاء الطلبات الجارية.';};
 
@@ -347,7 +388,11 @@ $('runScannerBtn').onclick=async()=>{
 
  try{
    $('status').textContent='Stage 1/4: تحميل القيمة السوقية والسيولة والسبريد...';
-   const [u,snap,ctx]=await Promise.all([getUniverse(),getBinanceSnapshot(),marketContexts()]);
+   const u=await getUniverse();
+   let snap;
+   try{snap=await getBinanceSnapshot();}
+   catch(e){throw new Error('فشل الاتصال ببيانات Binance العامة. تحقق من الإنترنت ثم أعد المحاولة. '+e.message);}
+   const ctx=await marketContexts();
 
    let candidates=[];
    for(const c of u.coins){
@@ -364,7 +409,7 @@ $('runScannerBtn').onclick=async()=>{
    const deep=candidates.slice(0,Math.min(40,candidates.length));
 
    let done=0;
-   const initial=await mapLimit(deep,5,async c=>{
+   const initial=await mapLimit(deep,3,async c=>{
      const cs=await fetchKlines(c.pair,cfg.tf,360),a=analyze(cs);
      done++;progress(done,deep.length,'Stage 2/4: التحليل الفني الأولي');
      return{...c,base:cs,a,raw:a.score};
@@ -377,7 +422,7 @@ $('runScannerBtn').onclick=async()=>{
    const finalists=[...new Map([...bullPool,...bearPool].map(x=>[x.pair,x])).values()];
 
    done=0;
-   const final=await mapLimit(finalists,3,async x=>{
+   const final=await mapLimit(finalists,2,async x=>{
      const mtf=await getMtf(x.pair,cfg.tf,x.base);
      const side=x.raw>=50?1:-1;
      const hist=await fetchKlines(x.pair,cfg.tf,900);
@@ -406,7 +451,7 @@ $('runScannerBtn').onclick=async()=>{
    ['scannerSummary','bullishCard','bearishCard','integrityCard','nearMissCard'].forEach(id=>$(id).classList.remove('hidden'));
 
    const lowIntegrity=good.filter(x=>!x.integrity.pass).length;
-   $('scannerSummary').innerHTML=`<h2>V5.6 Scanner Summary</h2><div class="metrics">
+   $('scannerSummary').innerHTML=`<h2>V5.6.1 Scanner Summary</h2><div class="metrics">
      ${metric('Market-cap source',esc(u.source))}
      ${metric('Eligible universe',candidates.length)}
      ${metric('Deep-scanned',deep.length)}
