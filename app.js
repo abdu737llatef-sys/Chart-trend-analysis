@@ -2,7 +2,7 @@ const $=id=>document.getElementById(id);
 let deferredPrompt=null,currentLive=null,currentTf='H1';
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
- const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.2',{updateViaCache:'none'}); await reg.update();
+ const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.3',{updateViaCache:'none'}); await reg.update();
 }catch(e){console.warn(e);}});
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('installBtn').classList.remove('hidden');});
 $('installBtn').onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('installBtn').classList.add('hidden');};
@@ -64,7 +64,7 @@ function quickOOS(cs){
 
 async function fetchHistory(symbol,interval,market,total=900){
  const clean=symbol.toUpperCase().replace(/[^A-Z0-9]/g,''),base=market==='futures'?'https://fapi.binance.com/fapi/v1/klines':'https://data-api.binance.vision/api/v3/klines';let end=Date.now(),all=[];
- while(all.length<total){const limit=Math.min(1000,total-all.length),u=`${base}?symbol=${clean}&interval=${interval}&limit=${limit}&endTime=${end}`,r=await fetch(u),d=await r.json();if(!r.ok||!Array.isArray(d))throw new Error(d?.msg||'تعذر جلب Binance');if(!d.length)break;const b=d.map(x=>({time:+x[0],open:+x[1],high:+x[2],low:+x[3],close:+x[4],volume:+x[5]}));all=[...b,...all];end=b[0].time-1;if(b.length<limit)break;}
+ while(all.length<total){const limit=Math.min(1000,total-all.length),u=`${base}?symbol=${clean}&interval=${interval}&limit=${limit}&endTime=${end}`,r=await fetch(u),d=await r.json();if(!r.ok||!Array.isArray(d))throw new Error(d?.msg||'تعذر جلب Binance');if(!d.length)break;const now=Date.now();const b=d.map(x=>({time:+x[0],open:+x[1],high:+x[2],low:+x[3],close:+x[4],volume:+x[5],closeTime:+x[6]})).filter(x=>x.closeTime<now);all=[...b,...all];end=b[0].time-1;if(b.length<limit)break;}
  const seen=new Set();return all.filter(x=>!seen.has(x.time)&&seen.add(x.time)).sort((a,b)=>a.time-b.time).slice(-total);
 }
 async function marketContext(){

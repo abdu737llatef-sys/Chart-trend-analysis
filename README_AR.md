@@ -1,55 +1,72 @@
-# Chart Trend Analyzer V5.6.2 — Calibration Fix
+# Chart Trend Analyzer V5.6.3 — Signal Lock & Decision Cards
 
-## لماذا هذا التحديث؟
-V5.6 كان صارمًا، لكن الاختبار أظهر أن:
-- Abnormal Wick Density يظهر كثيرًا.
-- Extreme Long/Short Crowding قد يكون حساسًا جدًا.
-- Depth كرقم ثابت وحده غير كافٍ.
-- جداول الهاتف كانت واسعة.
-- نحتاج رؤية أقرب المرشحين حتى عند عدم وجود فرصة نهائية.
+## أهم إصلاح
+في النسخ السابقة كان آخر Kline القادم من Binance قد يكون ما يزال مفتوحًا.
+على H1 مثلًا تتغير High/Low/Close/Volume/RSI/MACD/ADX طوال الساعة، ولذلك قد يتغير Score والاتجاه والمستويات قبل إغلاق الشمعة.
 
-## التحسينات
+V5.6.3:
+- يستبعد الشمعة المفتوحة من التحليل الفني.
+- Technical direction يُقفل على آخر شمعة مغلقة.
+- Paper Entry / Stop / TP1 / TP2 تُقفل لنفس الشمعة.
+- لا يعاد تحديد الاتجاه حتى تغلق الشمعة التالية.
+- Market Integrity يبقى Live ويمكنه فقط حجب المرشح إذا تدهورت السيولة/البيانات.
 
-### 1) ATR-normalized wick anomaly
-بدل عد الويكات الطويلة فقط:
-- يقيس wick ratio.
-- يقارن Range مع ATR.
-- يستخدم P90 داخل تاريخ العملة نفسه.
-- لا يعاقب العملة إلا إذا كان الويك غير طبيعي مقارنة بسلوكها التاريخي.
+## Strong Bullish / Strong Bearish الجديدة
+المرشح النهائي يجب أن يمر:
+1. Closed candle only
+2. Technical threshold
+3. MTF score
+4. Higher-timeframe veto
+5. OOS accuracy
+6. Minimum resolved OOS sample
+7. Wilson 95% lower confidence bound
+8. Profit Factor
+9. Integrity
+10. Depth / source agreement / anomaly checks
 
-### 2) Fake breakouts adjusted by volatility
-يحسب تكرار الاختراقات الكاذبة ضمن سياق التذبذب بدل Threshold ثابت فقط.
+Defaults:
+- Bull >= 90
+- Bear <= 10
+- OOS accuracy >= 55%
+- PF >= 1.20
+- Resolved N >= 30
+- Wilson 95% lower bound >= 50%
+- Integrity >= 80
 
-### 3) Volume rejection percentile
-لا يعتبر الحجم مرتفعًا لمجرد رقم ثابت؛ يستخدم 95th percentile من تاريخ العملة.
+## Sample confidence
+- Preliminary: >=30 resolved, Wilson95 >=50%, PF>=1.20
+- Medium: >=50 resolved, Wilson95 >=50%, PF>=1.20
+- High: >=100 resolved, Wilson95 >=53%, PF>=1.30
 
-### 4) Derivatives percentiles
-Funding / Long-Short / OI:
-- يقارن القيمة الحالية بتاريخها الحديث.
-- يظهر flag فقط إذا كانت في المنطقة القصوى تقريبًا >95th percentile.
+هذه ليست احتمالات نجاح للصفقة القادمة.
 
-### 5) Relative Depth
-Depth الآن يقاس بطريقتين:
-- قيمة مطلقة داخل ±0.5%.
-- Depth / 24h Quote Volume.
-وبالتالي لا يعامل كل العملات بنفس الرقم الثابت فقط.
+## Higher-TF veto
+- M15: H1 لا يجوز أن يكون قويًا في الاتجاه المعاكس.
+- H1: D1 لا يجوز أن يكون قويًا في الاتجاه المعاكس.
+- D1: لا يوجد veto أعلى في النسخة الحالية.
 
-### 6) Top 3 Closest Bullish / Bearish
-إذا لم توجد فرص نهائية:
-- يعرض أقرب 3 صاعدة.
-- أقرب 3 هابطة.
-- يوضح الشرط الناقص.
-- لا يعرض Entry/TP/Stop لهم.
+## Mobile Decision Cards
+لكل مرشح نهائي:
+- Verification
+- Live Integrity
+- OOS accuracy
+- Resolved N
+- Wilson95 lower bound
+- PF
+- MTF + Higher-TF status
+- Paper Entry
+- Paper Stop
+- Paper TP1
+- Paper TP2
+- R:R
+- وقت الشمعة التي تم قفل الإشارة عليها
 
-### 7) Mobile UI
-تقليل عرض جداول diagnostics وإضافة بطاقات مختصرة للمرشحين القريبين.
+## Closest lists
+تم إصلاح التكرار: العملة التي ظهرت في Strong Bullish/Bearish لن تظهر مرة أخرى في Top 3 Closest.
 
-## قاعدة Paper levels
-Paper Entry / TP1 / TP2 / Stop تظهر فقط في Strong Bullish / Strong Bearish بعد اجتياز كل الفلاتر النهائية.
+## Paper-only
+كل Entry / TP / Stop في التطبيق للمحاكاة والبحث فقط.
 
-## التحديث
-افتح:
-https://YOURNAME.github.io/YOUR-REPO/?v=5.6.2
-
-والـScanner:
-https://YOURNAME.github.io/YOUR-REPO/scanner.html?v=5.6.2
+## GitHub Pages
+https://YOURNAME.github.io/YOUR-REPO/?v=5.6.3
+https://YOURNAME.github.io/YOUR-REPO/scanner.html?v=5.6.3

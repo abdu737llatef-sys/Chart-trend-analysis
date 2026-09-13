@@ -5,6 +5,19 @@ const mean=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:0;
 const median=a=>{if(!a.length)return 0;const b=[...a].sort((x,y)=>x-y),m=Math.floor(b.length/2);return b.length%2?b[m]:(b[m-1]+b[m])/2;};
 const clamp=(x,a=0,b=100)=>Math.max(a,Math.min(b,x));
 
+
+const wilsonLower95=(wins,n)=>{
+  if(!n)return 0;
+  const z=1.96,p=wins/n,z2=z*z,den=1+z2/n;
+  return (p+z2/(2*n)-z*Math.sqrt((p*(1-p)+z2/(4*n))/n))/den;
+};
+const sampleConfidence=(v)=>{
+  if(v.resolved>=100&&v.wilson95>=.53&&v.pf>=1.30)return'High';
+  if(v.resolved>=50&&v.wilson95>=.50&&v.pf>=1.20)return'Medium';
+  if(v.resolved>=30&&v.wilson95>=.50&&v.pf>=1.20)return'Preliminary';
+  return'Low';
+};
+
 const percentile=(arr,p)=>{
   const a=arr.filter(Number.isFinite).sort((x,y)=>x-y);
   if(!a.length)return null;
@@ -26,7 +39,7 @@ const FALLBACK_LARGE=['BTC','ETH','BNB','XRP','SOL','DOGE','ADA','TRX','AVAX','L
 const leveragedRe=/(UP|DOWN|BULL|BEAR|3L|3S)$/i;
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
-  const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.2',{updateViaCache:'none'});
+  const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.3',{updateViaCache:'none'});
   await reg.update();
 }catch(e){console.warn(e);}});
 
@@ -52,7 +65,7 @@ function analyze(cs){
  let volumeFlow=50;if(vr>=1.5&&last.close>last.open)volumeFlow=88;else if(vr>=1.2&&last.close>last.open)volumeFlow=72;else if(vr>=1.5&&last.close<last.open)volumeFlow=12;else if(vr>=1.2&&last.close<last.open)volumeFlow=28;
  const score=structure*.24+((trend+ichi)/2)*.30+mom*.18+strength*.15+volumeFlow*.13;
  const resistance=ah.length?ah.at(-1).price:Math.max(...cs.slice(-30).map(x=>x.high)),support=al.length?al.at(-1).price:Math.min(...cs.slice(-30).map(x=>x.low));
- return{price:last.close,score,side:score>=65?1:score<=35?-1:0,structure,trend:(trend+ichi)/2,momentum:mom,strength,volumeFlow,atr:atrv,support,resistance};
+ return{price:last.close,score,side:score>=65?1:score<=35?-1:0,structure,trend:(trend+ichi)/2,momentum:mom,strength,volumeFlow,atr:atrv,support,resistance,barTime:last.time,barCloseTime:last.closeTime||null};
 }
 
 function barrierOutcome(cs,i,dir,atrv,h=12){
@@ -66,10 +79,15 @@ async function fetchJson(url,timeout=18000){
  try{const r=await fetch(url,{signal:ctl.signal,cache:'no-store'});if(!r.ok)throw new Error(`HTTP ${r.status}`);return await r.json();}
  finally{clearTimeout(t);}
 }
+
 async function fetchKlines(symbol,interval,limit=360){
- const d=await fetchJson(`https://data-api.binance.vision/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${Math.min(limit,1000)}`);
+ const requestLimit=Math.min(limit+1,1000);
+ const d=await fetchJson(`https://data-api.binance.vision/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${requestLimit}`);
  if(!Array.isArray(d))throw new Error('No klines');
- return d.map(x=>({time:+x[0],open:+x[1],high:+x[2],low:+x[3],close:+x[4],volume:+x[5]}));
+ const now=Date.now();
+ const rows=d.map(x=>({time:+x[0],open:+x[1],high:+x[2],low:+x[3],close:+x[4],volume:+x[5],closeTime:+x[6]}))
+   .filter(x=>x.closeTime<now);
+ return rows.slice(-limit);
 }
 
 async function getUniverse(){
@@ -103,11 +121,16 @@ async function mapLimit(items,limit,fn){
 }
 
 function tfWeights(tf){if(tf==='15m')return{'15m':.50,'1h':.30,'1d':.20};if(tf==='1h')return{'15m':.15,'1h':.55,'1d':.30};return{'15m':.10,'1h':.25,'1d':.65};}
+
 async function getMtf(symbol,baseTf,baseCandles){
  const tfs=['15m','1h','1d'],rows={};
  await Promise.all(tfs.map(async tf=>{const cs=tf===baseTf?baseCandles:await fetchKlines(symbol,tf,tf==='1d'?400:420);rows[tf]={a:analyze(cs)};}));
  const w=tfWeights(baseTf),mtf=Object.keys(w).reduce((s,tf)=>s+rows[tf].a.score*w[tf],0),dirs=Object.values(rows).map(x=>x.a.side).filter(Boolean);
- return{mtf,agreement:dirs.length?Math.abs(dirs.reduce((s,x)=>s+x,0))/dirs.length:0};
+ return{
+   mtf,
+   agreement:dirs.length?Math.abs(dirs.reduce((s,x)=>s+x,0))/dirs.length:0,
+   scores:{m15:rows['15m'].a.score,h1:rows['1h'].a.score,d1:rows['1d'].a.score}
+ };
 }
 async function marketContexts(){
  const out={};
@@ -117,10 +140,26 @@ async function marketContexts(){
  }
  return out;
 }
+
+function higherTfPass(baseTf,side,scores){
+ // Higher timeframe is a veto, not an entry trigger.
+ if(baseTf==='15m'){
+   if(side===1 && scores.h1<=35)return false;
+   if(side===-1 && scores.h1>=65)return false;
+   return true;
+ }
+ if(baseTf==='1h'){
+   if(side===1 && scores.d1<=35)return false;
+   if(side===-1 && scores.d1>=65)return false;
+   return true;
+ }
+ return true;
+}
+
 function validateSide(cs,targetSide){
  const start=Math.max(280,Math.floor(cs.length*.70)),end=cs.length-14;let wins=0,losses=0,amb=0,timeouts=0,signals=0;
  for(let i=start;i<end;i+=2){if(scannerCancelled)break;const w=cs.slice(Math.max(0,i-279),i+1);if(w.length<230)continue;const a=analyze(w);if(a.side!==targetSide)continue;signals++;const out=barrierOutcome(cs,i,targetSide,a.atr,12);if(out==='win')wins++;else if(out==='loss')losses++;else if(out==='amb')amb++;else timeouts++;}
- const resolved=wins+losses;return{signals,resolved,wins,losses,amb,timeouts,acc:resolved?wins/resolved:0,pf:losses?wins/losses:(wins?99:0)};
+ const resolved=wins+losses,acc=resolved?wins/resolved:0,pf=losses?wins/losses:(wins?99:0),wilson95=wilsonLower95(wins,resolved);const out={signals,resolved,wins,losses,amb,timeouts,acc,pf,wilson95};out.confidence=sampleConfidence(out);return out;
 }
 function paperLevels(a,side){
  const atrv=a.atr||a.price*.01,buf=.12*atrv;let entry,stop,tp1,tp2;
@@ -342,6 +381,13 @@ function progress(done,total,label){const p=total?Math.round(done/total*100):0;$
 
 function integrityClass(x){return x>=80?'integrityGood':x>=65?'integrityMid':'integrityBad';}
 function riskClass(x){return x<=20?'riskLow':x<=35?'riskMid':'riskHigh';}
+
+function confidenceClass(x){return x==='High'?'confHigh':x==='Medium'?'confMedium':x==='Preliminary'?'confPrelim':'confLow';}
+function barTimeText(x){
+ if(!x?.a?.barCloseTime)return'N/A';
+ return new Date(x.a.barCloseTime).toLocaleString('ar',{hour12:false});
+}
+
 function sourceText(cross){
  if(!cross?.available)return'1 source';
  return cross.sources.map(x=>x.name).join(' / ');
@@ -355,14 +401,60 @@ function rejectReason(x,cfg){
  const a=[];
  if(x.side===1&&x.verified<cfg.bullMin)a.push('Technical<'+cfg.bullMin);
  if(x.side===-1&&x.verified>cfg.bearMax)a.push('Technical>'+cfg.bearMax);
- if(x.validation.resolved<20)a.push('OOS sample');
+ if(x.validation.resolved<cfg.minResolved)a.push(`OOS sample ${x.validation.resolved}<${cfg.minResolved}`);
  if(x.validation.acc<cfg.minAcc)a.push('OOS accuracy');
  if(x.validation.pf<cfg.minPF)a.push('PF');
+ if(x.validation.wilson95<cfg.minWilson)a.push(`Wilson95 ${(x.validation.wilson95*100).toFixed(1)}%`);
+ if(!x.higherPass)a.push('Higher-TF veto');
  if(x.integrity.score<cfg.minIntegrity)a.push('Integrity');
  if(x.integrity.coverage<cfg.minCoverage)a.push('Integrity coverage');
  if(!x.integrity.depth.available||(x.integrity.depth.total<cfg.minDepth&&x.integrity.depth.depthToVolume<.0015))a.push('Thin depth');
  if(x.integrity.cross.available&&x.integrity.cross.maxDeviation>cfg.maxSourceDev)a.push('Provider disagreement');
  return a.join(' / ')||'Qualified';
+}
+
+
+function finalDecisionCards(rows,side,cfg){
+ if(!rows.length)return'';
+ return rows.map(x=>{
+   const rr1=Math.abs((x.levels.tp1-x.levels.entry)/(x.levels.entry-x.levels.stop));
+   const rr2=Math.abs((x.levels.tp2-x.levels.entry)/(x.levels.entry-x.levels.stop));
+   const conf=x.validation.confidence||sampleConfidence(x.validation);
+   const sideText=side===1?'STRONG BULLISH':'STRONG BEARISH';
+   const sideClass=side===1?'bullFinal':'bearFinal';
+   const pillClass=side===1?'bullPill':'bearPill';
+   return `<article class="finalDecisionCard ${sideClass}">
+     <div class="finalDecisionTop">
+       <div>
+         <h3>${esc(x.symbol)} <span class="rankTag">#${x.rank??'—'}</span></h3>
+         <div class="signalTime">Signal locked to closed ${esc(cfg.tf)} candle: ${esc(barTimeText(x))}</div>
+       </div>
+       <span class="signalPill ${pillClass}">${sideText}</span>
+     </div>
+     <div>
+       <span class="lockBadge">CLOSED‑CANDLE LOCK</span>
+       <span class="confBadge ${confidenceClass(conf)}">${esc(conf)} sample confidence</span>
+     </div>
+     <div class="decisionStats">
+       <div class="decisionStat"><small>Verification</small><b>${x.verified.toFixed(1)}</b></div>
+       <div class="decisionStat"><small>Integrity Live</small><b class="${integrityClass(x.integrity.score)}">${x.integrity.score.toFixed(1)}</b></div>
+       <div class="decisionStat"><small>OOS Accuracy</small><b>${(x.validation.acc*100).toFixed(1)}%</b></div>
+       <div class="decisionStat"><small>Resolved N</small><b>${x.validation.resolved}</b></div>
+       <div class="decisionStat"><small>Wilson 95% LB</small><b>${(x.validation.wilson95*100).toFixed(1)}%</b></div>
+       <div class="decisionStat"><small>Profit Factor</small><b>${x.validation.pf.toFixed(2)}</b></div>
+       <div class="decisionStat"><small>MTF</small><b>${x.mtf.toFixed(1)}</b></div>
+       <div class="decisionStat"><small>Higher TF</small><b class="${x.higherPass?'good':'bad'}">${x.higherPass?'PASS':'VETO'}</b></div>
+     </div>
+     <div class="paperLevels">
+       <div class="paperLevel"><small>Paper Entry</small><strong>${priceFmt(x.levels.entry)}</strong></div>
+       <div class="paperLevel"><small>Paper Stop</small><strong>${priceFmt(x.levels.stop)}</strong></div>
+       <div class="paperLevel"><small>Paper TP1</small><strong>${priceFmt(x.levels.tp1)}</strong><div class="rankTag">R:R ${rr1.toFixed(2)}</div></div>
+       <div class="paperLevel"><small>Paper TP2</small><strong>${priceFmt(x.levels.tp2)}</strong><div class="rankTag">R:R ${rr2.toFixed(2)}</div></div>
+     </div>
+     <div class="liveGuard">Technical direction and Paper levels stay fixed until the next ${esc(cfg.tf)} candle closes. Live Integrity may only PAUSE/BLOCK the candidate.</div>
+     <div class="ruleLine">D1/H1/M15 context: M15 ${x.mtfScores.m15.toFixed(1)} • H1 ${x.mtfScores.h1.toFixed(1)} • D1 ${x.mtfScores.d1.toFixed(1)} • Depth ${x.integrity.depth.available?usd(x.integrity.depth.total):'N/A'}</div>
+   </article>`;
+ }).join('');
 }
 
 function resultsTable(rows,side){
@@ -418,6 +510,9 @@ function closestCards(rows,side,cfg){
    if(side===-1&&x.verified>cfg.bearMax)gaps.push(`Technical ${x.verified.toFixed(1)} > ${cfg.bearMax}`);
    if(x.validation.acc<cfg.minAcc)gaps.push(`OOS ${(x.validation.acc*100).toFixed(1)}%`);
    if(x.validation.pf<cfg.minPF)gaps.push(`PF ${x.validation.pf.toFixed(2)}`);
+   if(x.validation.resolved<cfg.minResolved)gaps.push(`N ${x.validation.resolved}<${cfg.minResolved}`);
+   if(x.validation.wilson95<cfg.minWilson)gaps.push(`Wilson95 ${(x.validation.wilson95*100).toFixed(1)}%`);
+   if(!x.higherPass)gaps.push('Higher-TF veto');
    if(x.integrity.score<cfg.minIntegrity)gaps.push(`Integrity ${x.integrity.score.toFixed(1)}`);
    if(x.integrity.coverage<cfg.minCoverage)gaps.push(`Coverage ${Math.round(x.integrity.coverage*100)}%`);
    const technicalDistance=side===1?Math.max(0,cfg.bullMin-x.verified):Math.max(0,x.verified-cfg.bearMax);
@@ -425,7 +520,10 @@ function closestCards(rows,side,cfg){
    const pfDistance=Math.max(0,cfg.minPF-x.validation.pf)*10;
    const intDistance=Math.max(0,cfg.minIntegrity-x.integrity.score);
    const covDistance=Math.max(0,cfg.minCoverage-x.integrity.coverage)*100;
-   const distance=technicalDistance+accDistance+pfDistance+intDistance+covDistance;
+   const sampleDistance=Math.max(0,cfg.minResolved-x.validation.resolved)*.25;
+   const wilsonDistance=Math.max(0,cfg.minWilson-x.validation.wilson95)*100;
+   const htfDistance=x.higherPass?0:15;
+   const distance=technicalDistance+accDistance+pfDistance+intDistance+covDistance+sampleDistance+wilsonDistance+htfDistance;
    return{...x,gaps,distance};
  }).sort((a,b)=>a.distance-b.distance).slice(0,3);
 
@@ -459,7 +557,7 @@ $('runScannerBtn').onclick=async()=>{
    tf:$('scanTf').value,topRank:+$('scanTopRank').value,minCap:+$('scanMinCap').value,minVol:+$('scanMinVol').value,
    maxSpread:+$('scanMaxSpread').value,minDepth:+$('scanMinDepth').value,minIntegrity:+$('scanMinIntegrity').value,
    minCoverage:+$('scanMinCoverage').value,maxSourceDev:+$('scanMaxSourceDev').value,maxResults:+$('scanMaxResults').value,
-   bullMin:+$('scanBullMin').value,bearMax:+$('scanBearMax').value,minAcc:+$('scanMinAcc').value,minPF:+$('scanMinPF').value
+   bullMin:+$('scanBullMin').value,bearMax:+$('scanBearMax').value,minAcc:+$('scanMinAcc').value,minPF:+$('scanMinPF').value,minResolved:+$('scanMinResolved').value,minWilson:+$('scanMinWilson').value
  };
 
  try{
@@ -505,12 +603,12 @@ $('runScannerBtn').onclick=async()=>{
      const integrity=await integrityEngine(x,hist,cfg);
      const levels=paperLevels(x.a,side);
      done++;progress(done,finalists.length,'Stage 3/4: MTF + OOS + Market Integrity');
-     return{...x,side,mtf:mtf.mtf,agreement:mtf.agreement,context,verified,validation,integrity,levels};
+     const higherPass=higherTfPass(cfg.tf,side,mtf.scores);return{...x,side,mtf:mtf.mtf,agreement:mtf.agreement,mtfScores:mtf.scores,higherPass,context,verified,validation,integrity,levels};
    });
    if(scannerCancelled)throw new Error('Scan cancelled');
 
    const good=final.filter(x=>x&&!x.error);
-   const qualifies=x=>x.validation.resolved>=20&&x.validation.acc>=cfg.minAcc&&x.validation.pf>=cfg.minPF&&x.integrity.pass;
+   const qualifies=x=>x.validation.resolved>=cfg.minResolved&&x.validation.acc>=cfg.minAcc&&x.validation.pf>=cfg.minPF&&x.validation.wilson95>=cfg.minWilson&&x.higherPass&&x.integrity.pass;
    const bulls=good.filter(x=>x.side===1&&x.verified>=cfg.bullMin&&qualifies(x))
      .sort((a,b)=>b.integrity.score-a.integrity.score||b.verified-a.verified||b.validation.pf-a.validation.pf).slice(0,cfg.maxResults);
    const bears=good.filter(x=>x.side===-1&&x.verified<=cfg.bearMax&&qualifies(x))
@@ -523,7 +621,7 @@ $('runScannerBtn').onclick=async()=>{
    ['scannerSummary','bullishCard','bearishCard','closestGrid','integrityCard','nearMissCard'].forEach(id=>$(id).classList.remove('hidden'));
 
    const lowIntegrity=good.filter(x=>!x.integrity.pass).length;
-   $('scannerSummary').innerHTML=`<h2>V5.6.2 Scanner Summary</h2><div class="metrics">
+   $('scannerSummary').innerHTML=`<h2>V5.6.3 Scanner Summary</h2><div class="metrics">
      ${metric('Market-cap source',esc(u.source))}
      ${metric('Eligible universe',candidates.length)}
      ${metric('Deep-scanned',deep.length)}
@@ -532,13 +630,15 @@ $('runScannerBtn').onclick=async()=>{
      ${metric('Strong bullish',bulls.length,'good')}
      ${metric('Strong bearish',bears.length,'bad')}
      ${metric('BTC/ETH context',ctx[cfg.tf].score.toFixed(1))}
-   </div><p class="muted">المرشح النهائي يجب أن يمر عبر: Technical → MTF → OOS → PF → Depth → Cross-source → Anomaly Guard. عدم وجود مرشح نهائي نتيجة مقبولة.</p>`;
+   </div><p class="muted">المرشح النهائي يجب أن يمر عبر: Closed Candle → Technical → Higher-TF veto → OOS → Wilson95 → PF → Depth → Cross-source → Anomaly Guard. عدم وجود مرشح نهائي نتيجة مقبولة.</p>`;
 
+   $('bullishDecisionCards').innerHTML=finalDecisionCards(bulls,1,cfg);
+   $('bearishDecisionCards').innerHTML=finalDecisionCards(bears,-1,cfg);
    $('bullishTable').innerHTML=resultsTable(bulls,1);
    $('bearishTable').innerHTML=resultsTable(bears,-1);
    $('integrityTable').innerHTML=integrityTable([...good].sort((a,b)=>a.integrity.score-b.integrity.score));
-   $('closestBullishTable').innerHTML=closestCards(good,1,cfg);
-   $('closestBearishTable').innerHTML=closestCards(good,-1,cfg);
+   $('closestBullishTable').innerHTML=closestCards(near,1,cfg);
+   $('closestBearishTable').innerHTML=closestCards(near,-1,cfg);
    $('nearMissTable').innerHTML=nearTable(near);
 
    $('status').textContent=`Stage 4/4 complete: ${bulls.length} Bullish و${bears.length} Bearish اجتازوا جميع فلاتر V5.6.2.`;
