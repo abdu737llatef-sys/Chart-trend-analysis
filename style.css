@@ -159,3 +159,11 @@ table{width:100%;border-collapse:collapse;min-width:760px}th,td{padding:9px 8px;
 .journalActions{display:flex;justify-content:flex-end;margin-bottom:8px}
 .smallBtn{border:1px solid #40587f;background:#13243e;color:#d8e5ff;border-radius:9px;padding:7px 10px}
 @media(max-width:800px){.scenarioGrid{grid-template-columns:1fr}}
+
+/* V5.6.6.1 — Execution Integrity Fix */
+.stateReady{background:#24354e;border:1px solid #5874a0;color:#c9dbff}
+.nextAction{margin-top:10px;padding:10px;border-radius:12px;background:#0a1729;border:1px solid #365178;line-height:1.75}
+.executionBox{margin-top:10px;padding:12px;border-radius:13px;background:#10241f;border:1px solid #34715f}
+.executionBox h3{margin:0 0 8px}.executionBox .scenarioGrid{margin-top:8px}
+.plannedBox{margin-top:10px;padding:10px;border-radius:12px;background:#161b29;border:1px solid #3a4968}
+.miniNote{font-size:10px;color:#93a8cb;line-height:1.65;margin-top:7px}

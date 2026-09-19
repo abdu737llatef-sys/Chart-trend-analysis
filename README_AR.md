@@ -1,64 +1,68 @@
-# V5.6.6 — Scenario Lifecycle + Smart Retest Entry
+# Chart Trend Analyzer V5.6.6.1
+## Execution Integrity Fix
 
-## 1) Scenario Persistence
-Paper scenarios are stored in localStorage and are no longer deleted when a new analysis is run.
+هذه نسخة تصحيحية قبل V5.6.7 A/B Entry Validator.
 
-States:
-- PENDING_BREAKOUT
-- WAITING_RETEST
-- PAUSED_INTEGRITY
-- TRIGGERED
-- TP1_HIT
-- TP2_HIT
-- STOPPED
-- INVALIDATED
-- EXPIRED
-- AMBIGUOUS
+### 1. Direction Agreement
+المحايد لم يعد يُحذف من المقام.
+مثال:
+- M15 Neutral
+- H1 Bullish
+- D1 Bullish
 
-The app keeps a Paper Scenario Journal per symbol.
+يعرض:
+- Direction Agreement = 66.7%
+- Directional Frames = 2/3
 
-## 2) Smart Entry Model
-The system no longer treats a wick above resistance as sufficient confirmation.
+بدل 100%.
 
-For strong levels:
-- require a CLOSED candle above resistance / below support;
-- then prefer a successful retest before triggering.
+### 2. Expiry display
+تم فصل:
+- Bars elapsed
+- Maximum pending bars
 
-For strong momentum + adequate volume/ADX:
-- the model may use a closed-candle continuation entry without waiting for a retest.
+لمنع انعكاس RTL مثل 8 / 0.
 
-The model records:
-- level strength 0-100;
-- historical touch count;
-- breakout level;
-- retest zone;
-- expiry bars.
+### 3. لماذا ينتظر Retest؟
+تم فصل السببين:
+- STRONG_LEVEL: مستوى قوي يحتاج إغلاق + Retest.
+- INSUFFICIENT_MOMENTUM_VOLUME: المستوى ليس قويًا بالضرورة، لكن الزخم/الحجم غير كافيين لقبول continuation.
 
-## 3) Ambiguous OHLC Handling
-If the same closed candle reaches both an adverse and favorable barrier after trigger, state becomes AMBIGUOUS because OHLC data cannot prove the intrabar order.
+إذا كان:
+Momentum >= 70
+ADX/DI strength >= 65
+Volume >= 60
+يمكن للنموذج اختيار closed-candle continuation بدون Retest عندما تسمح بقية الشروط.
 
-## 4) RTL Fix
-Resolved OOS N and Minimum Required are now displayed in separate boxes.
+### 4. Planned vs Actual Paper Trigger
+قبل التفعيل:
+- Planned Entry Reference
+- Planned Stop / TP1 / TP2
 
-## 5) Forex / Gold architecture recommendation
-The technical core is transferable, but crypto-specific context/integrity is not.
+بعد شمعة تأكيد الاختراق أو Retest:
+الحالة تصبح READY_NEXT_OPEN.
 
-Recommended single-app architecture:
-- Crypto profile
-- Forex profile
-- Gold/Metals profile
+سعر التنفيذ البحثي:
+- Actual Paper Trigger = Open الشمعة التالية بعد شمعة التأكيد.
 
-Forex/Gold should use:
-- 24/5 session logic and DST-aware London/New York;
-- broker tick volume or futures-volume proxy instead of centralized spot volume;
-- pip/tick-aware spread and slippage;
-- rollover/swap and weekend gaps;
-- economic-news blackout windows;
-- pair-specific costs;
-- DXY / rates / currency-strength context where relevant;
-- walk-forward calibration by pair and timeframe.
+هذا يمنع استخدام Close شمعة التأكيد نفسها كسعر تعبئة افتراضي بعد أن أصبح معلومًا.
 
-A live Forex module should not be faked with Binance data. It needs a dedicated FX data provider or broker feed.
+### 5. Effective levels
+بعد Actual Paper Trigger:
+- Effective Stop = مستوى الإبطال البنيوي المخطط
+- Effective TP1 = 1.20R من سعر التنفيذ الفعلي
+- Effective TP2 = 2.00R من سعر التنفيذ الفعلي
 
-## Paper-only
-All levels remain research/reference levels, not live-trading instructions.
+ويحتفظ Journal بالمستويات المخططة والمستويات الفعلية للمقارنة.
+
+### 6. Lifecycle
+PENDING_BREAKOUT
+→ WAITING_RETEST (عند الحاجة)
+→ READY_NEXT_OPEN
+→ TRIGGERED
+→ TP1_HIT / TP2_HIT / STOPPED / INVALIDATED / EXPIRED / AMBIGUOUS
+
+### 7. ملاحظة
+لا توجد مراقبة Push في الخلفية في GitHub Pages.
+تتحدث الحالة عند فتح التطبيق أو تشغيل التحليل.
+كل المستويات Paper Research فقط.
