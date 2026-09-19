@@ -2,7 +2,7 @@ const $=id=>document.getElementById(id);
 let deferredPrompt=null,currentLive=null,currentTf='H1';
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
- const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.5',{updateViaCache:'none'});await reg.update();
+ const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.6',{updateViaCache:'none'});await reg.update();
 }catch(e){console.warn(e);}});
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('installBtn').classList.remove('hidden');});
 $('installBtn').onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('installBtn').classList.add('hidden');};
@@ -23,6 +23,40 @@ const clamp=(x,a=0,b=100)=>Math.max(a,Math.min(b,x));
 const fmt=(x,n=4)=>Number.isFinite(x)?Number(x).toFixed(n):'N/A';
 const esc=(s='')=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pct=x=>Number.isFinite(x)?`${(x*100).toFixed(1)}%`:'N/A';
+
+const SCENARIO_KEY='cta_v566_paper_scenarios';
+function loadScenarios(){
+ try{const x=JSON.parse(localStorage.getItem(SCENARIO_KEY)||'[]');return Array.isArray(x)?x:[];}catch{return[];}
+}
+function saveScenarios(rows){
+ try{localStorage.setItem(SCENARIO_KEY,JSON.stringify(rows.slice(-250)));}catch{}
+}
+function scenarioId(symbol,tf,barCloseTime,side){
+ return `${symbol}:${tf}:${barCloseTime||Date.now()}:${side}`;
+}
+function activeScenarioFor(symbol,tf){
+ return loadScenarios().filter(x=>x.symbol===symbol&&x.tf===tf&&!['TP2_HIT','STOPPED','INVALIDATED','EXPIRED','AMBIGUOUS'].includes(x.state)).at(-1)||null;
+}
+function scenarioStateClass(s){
+ if(s==='PENDING_BREAKOUT')return'statePending';
+ if(s==='WAITING_RETEST')return'stateRetest';
+ if(s==='TRIGGERED')return'stateTriggered';
+ if(s==='TP1_HIT'||s==='TP2_HIT')return'stateWin';
+ if(s==='STOPPED'||s==='INVALIDATED'||s==='AMBIGUOUS')return'stateLoss';
+ if(s==='PAUSED_INTEGRITY')return'statePaused';
+ return'stateEnded';
+}
+function expiryBars(tf){return tf==='M15'?16:tf==='H1'?8:5;}
+function barsAfter(cs,closeTime){return cs.filter(c=>(c.closeTime||0)>(closeTime||0));}
+function separatedTouches(cs,level,tol,kind){
+ let last=-99,n=0;
+ for(let i=Math.max(2,cs.length-140);i<cs.length-2;i++){
+   const hit=kind==='R'?Math.abs(cs[i].high-level)<=tol:Math.abs(cs[i].low-level)<=tol;
+   if(hit&&i-last>=4){n++;last=i;}
+ }
+ return n;
+}
+
 
 function ema(v,p){const o=Array(v.length).fill(null);if(v.length<p)return o;const k=2/(p+1);let z=mean(v.slice(0,p));o[p-1]=z;for(let i=p;i<v.length;i++){z=v[i]*k+z*(1-k);o[i]=z;}return o;}
 function sma(v,p){const o=Array(v.length).fill(null);let s=0;for(let i=0;i<v.length;i++){s+=v[i];if(i>=p)s-=v[i-p];if(i>=p-1)o[i]=s/p;}return o;}
@@ -106,12 +140,16 @@ function technicalCore(cs){
    srBreakout*.11;
  const baseWeight=.90;
  const h=new Date(last.time).getUTCHours(),session=h<7?'Asia':h<13?'London':h<16?'London/NY Overlap':h<21?'New York':'Late',regime=adxv>=25?'Trending':adxv<18?'Ranging':'Mixed';
+ const levelTol=Math.max((atrv||last.close*.01)*.22,last.close*.0008);
+ const resistanceTouches=separatedTouches(cs,resistance,levelTol,'R'),supportTouches=separatedTouches(cs,support,levelTol,'S');
+ const resistanceStrength=clamp(28+resistanceTouches*16+(structure>=80?10:0)+(adxv>=25?8:0));
+ const supportStrength=clamp(28+supportTouches*16+(structure<=20?10:0)+(adxv>=25?8:0));
 
  return{
    price:last.close,components,baseScore,baseWeight,
    structure,trend,momentum,strength,volumeFlow,srBreakout,
    rsi:rv,adx:adxv,atr:atrv,ema20:E20,ema50:E50,ema200:E200,macd:mac,macdSignal:sig,volumeRatio:vr,
-   support,resistance,session,regime,barTime:last.time,barCloseTime:last.closeTime
+   support,resistance,resistanceTouches,supportTouches,resistanceStrength,supportStrength,session,regime,barTime:last.time,barCloseTime:last.closeTime
  };
 }
 
@@ -264,21 +302,71 @@ async function marketContext(){
  return{btc:ba.baseScore/ba.baseWeight,eth:ea.baseScore/ea.baseWeight,score,direction:score>=60?'Bullish':score<=40?'Bearish':'Neutral'};
 }
 function paperLevels(a){
- const atrv=Math.max(a.atr,a.price*.002),trigger=.08*atrv;let entry,stop,tp1,tp2,mode;
+ const atrv=Math.max(a.atr,a.price*.002),buf=.08*atrv,retestTol=.22*atrv;
+ let entry,stop,tp1,tp2,mode,triggerMode,breakoutLevel,retestLow,retestHigh;
+ const highMomentum=a.momentum>=70&&a.strength>=65&&a.volumeFlow>=60;
  if(a.side===1){
-   if(a.price<a.resistance){entry=a.resistance+trigger;mode='Breakout confirmation above resistance';}
-   else{entry=Math.max(a.resistance+.03*atrv,a.price-.15*atrv);mode='Retest/continuation reference';}
-   const structural=a.support-.10*atrv;
+   breakoutLevel=a.resistance;
+   const strong=(a.resistanceStrength||0)>=65;
+   if(a.price<=a.resistance+buf){
+     if(strong||!highMomentum){
+       mode='Closed-candle breakout + successful retest of strong resistance';
+       triggerMode='BREAKOUT_CLOSE_RETEST';
+       retestLow=a.resistance-retestTol;retestHigh=a.resistance+retestTol;
+       entry=a.resistance+.03*atrv;
+     }else{
+       mode='Closed-candle breakout continuation';
+       triggerMode='BREAKOUT_CLOSE';
+       entry=a.resistance+buf;
+     }
+   }else{
+     if(strong){
+       mode='Retest of broken resistance before continuation';
+       triggerMode='RETEST_AFTER_BREAKOUT';
+       retestLow=a.resistance-retestTol;retestHigh=a.resistance+retestTol;
+       entry=a.resistance+.03*atrv;
+     }else{
+       mode='Momentum continuation after confirmed close';
+       triggerMode='BREAKOUT_CLOSE';
+       entry=a.price+.04*atrv;
+     }
+   }
+   const structural=Math.min(a.support-.10*atrv,entry-.90*atrv);
    let risk=entry-structural;risk=Math.max(.90*atrv,Math.min(risk,1.80*atrv));
    stop=entry-risk;tp1=entry+1.20*risk;tp2=entry+2.00*risk;
  }else{
-   if(a.price>a.support){entry=a.support-trigger;mode='Breakdown confirmation below support';}
-   else{entry=Math.min(a.support-.03*atrv,a.price+.15*atrv);mode='Retest/continuation reference';}
-   const structural=a.resistance+.10*atrv;
+   breakoutLevel=a.support;
+   const strong=(a.supportStrength||0)>=65;
+   if(a.price>=a.support-buf){
+     if(strong||!highMomentum){
+       mode='Closed-candle breakdown + successful retest of strong support';
+       triggerMode='BREAKDOWN_CLOSE_RETEST';
+       retestLow=a.support-retestTol;retestHigh=a.support+retestTol;
+       entry=a.support-.03*atrv;
+     }else{
+       mode='Closed-candle breakdown continuation';
+       triggerMode='BREAKDOWN_CLOSE';
+       entry=a.support-buf;
+     }
+   }else{
+     if(strong){
+       mode='Retest of broken support before continuation';
+       triggerMode='RETEST_AFTER_BREAKDOWN';
+       retestLow=a.support-retestTol;retestHigh=a.support+retestTol;
+       entry=a.support-.03*atrv;
+     }else{
+       mode='Momentum continuation after confirmed close';
+       triggerMode='BREAKDOWN_CLOSE';
+       entry=a.price-.04*atrv;
+     }
+   }
+   const structural=Math.max(a.resistance+.10*atrv,entry+.90*atrv);
    let risk=structural-entry;risk=Math.max(.90*atrv,Math.min(risk,1.80*atrv));
    stop=entry+risk;tp1=entry-1.20*risk;tp2=entry-2.00*risk;
  }
- return{entry,stop,tp1,tp2,mode};
+ return{entry,stop,tp1,tp2,mode,triggerMode,breakoutLevel,retestLow,retestHigh,
+   resistanceStrength:a.resistanceStrength||0,supportStrength:a.supportStrength||0,
+   resistanceTouches:a.resistanceTouches||0,supportTouches:a.supportTouches||0};
 }
 function confidenceTier(hist,integrity,techScore){
  if(hist.n>=100&&hist.wilson>=.53&&hist.pf>=1.30&&integrity.score>=80&&(techScore>=80||techScore<=20))return'HIGH CONFIDENCE';
@@ -308,6 +396,126 @@ function nearQualified(frame,cfg){
  return passed>=3 || (passed>=2&&nClose&&accClose&&pfClose&&wClose);
 }
 
+
+function createScenarioIfNeeded(frame,cs,symbol){
+ const d=frame.decision;
+ if(!frame.a.side||!(d.status!=='BLOCKED'||frame.near)||!frame.levels)return;
+ let rows=loadScenarios(),active=rows.filter(x=>x.symbol===symbol&&x.tf===frame.tf&&!['TP2_HIT','STOPPED','INVALIDATED','EXPIRED','AMBIGUOUS'].includes(x.state)).at(-1);
+ if(active)return;
+ const L=frame.levels,initialState=
+   ['RETEST_AFTER_BREAKOUT','RETEST_AFTER_BREAKDOWN'].includes(L.triggerMode)?'WAITING_RETEST':'PENDING_BREAKOUT';
+ const s={
+   id:scenarioId(symbol,frame.tf,frame.a.barCloseTime,frame.a.side),
+   symbol,tf:frame.tf,side:frame.a.side,state:initialState,
+   createdAt:Date.now(),createdBarCloseTime:frame.a.barCloseTime,
+   lastUpdate:Date.now(),entry:L.entry,stop:L.stop,tp1:L.tp1,tp2:L.tp2,
+   mode:L.mode,triggerMode:L.triggerMode,breakoutLevel:L.breakoutLevel,
+   retestLow:L.retestLow,retestHigh:L.retestHigh,
+   referenceOnly:d.status==='BLOCKED',sourceStatus:d.status,
+   expiryBars:expiryBars(frame.tf),barCount:0,
+   resistanceStrength:L.resistanceStrength,supportStrength:L.supportStrength,
+   resistanceTouches:L.resistanceTouches,supportTouches:L.supportTouches,
+   integrityAtCreation:frame.integrity.score,techAtCreation:frame.a.score
+ };
+ rows.push(s);saveScenarios(rows);
+}
+function updateScenarioLifecycle(symbol,frame,cs){
+ let rows=loadScenarios(),changed=false;
+ rows=rows.map(s=>{
+   if(s.symbol!==symbol||s.tf!==frame.tf||['TP2_HIT','STOPPED','INVALIDATED','EXPIRED','AMBIGUOUS'].includes(s.state))return s;
+   const bars=barsAfter(cs,s.createdBarCloseTime),fresh={...s,barCount:bars.length,lastUpdate:Date.now()};
+   if(bars.length>s.expiryBars&&['PENDING_BREAKOUT','WAITING_RETEST','PAUSED_INTEGRITY'].includes(fresh.state)){
+     fresh.state='EXPIRED';fresh.endReason='Entry condition did not trigger before expiry';changed=true;return fresh;
+   }
+   if(frame.a.side&&frame.a.side!==s.side){
+     fresh.state='INVALIDATED';fresh.endReason='Closed-candle technical direction reversed';changed=true;return fresh;
+   }
+   if(frame.veto){
+     fresh.state='INVALIDATED';fresh.endReason='Higher-timeframe veto appeared';changed=true;return fresh;
+   }
+   if(frame.integrity.score<60){
+     if(fresh.state!=='TRIGGERED'&&fresh.state!=='TP1_HIT')fresh.state='PAUSED_INTEGRITY';
+     changed=true;
+   }else if(fresh.state==='PAUSED_INTEGRITY'){
+     fresh.state=['RETEST_AFTER_BREAKOUT','RETEST_AFTER_BREAKDOWN'].includes(s.triggerMode)?'WAITING_RETEST':'PENDING_BREAKOUT';changed=true;
+   }
+   const long=s.side===1;
+   let triggerIndex=-1;
+   if(fresh.state==='PENDING_BREAKOUT'){
+     for(let i=0;i<bars.length;i++){
+       const b=bars[i];
+       const confirmed=long?b.close>s.breakoutLevel:b.close<s.breakoutLevel;
+       if(confirmed){
+         if(['BREAKOUT_CLOSE_RETEST','BREAKDOWN_CLOSE_RETEST'].includes(s.triggerMode)){
+           fresh.state='WAITING_RETEST';fresh.breakoutConfirmedAt=b.closeTime;fresh.breakoutClose=b.close;
+         }else{
+           fresh.state='TRIGGERED';fresh.triggeredAt=b.closeTime;fresh.triggerPrice=b.close;triggerIndex=i;
+         }
+         changed=true;break;
+       }
+     }
+   }
+   if(fresh.state==='WAITING_RETEST'){
+     const start=fresh.breakoutConfirmedAt?bars.findIndex(b=>b.closeTime>fresh.breakoutConfirmedAt):0;
+     for(let i=Math.max(0,start);i<bars.length;i++){
+       const b=bars[i],touch=b.low<=s.retestHigh&&b.high>=s.retestLow;
+       const hold=long?b.close>s.breakoutLevel:b.close<s.breakoutLevel;
+       const fail=long?b.close<s.stop:b.close>s.stop;
+       if(fail){fresh.state='INVALIDATED';fresh.endReason='Retest failed through structural invalidation';changed=true;break;}
+       if(touch&&hold){
+         fresh.state='TRIGGERED';fresh.triggeredAt=b.closeTime;fresh.triggerPrice=b.close;triggerIndex=i;changed=true;break;
+       }
+     }
+   }
+   if(fresh.state==='TRIGGERED'||fresh.state==='TP1_HIT'){
+     const startTime=fresh.triggeredAt||0,post=bars.filter(b=>b.closeTime>=startTime);
+     for(const b of post){
+       const stopHit=long?b.low<=s.stop:b.high>=s.stop;
+       const tp1Hit=long?b.high>=s.tp1:b.low<=s.tp1;
+       const tp2Hit=long?b.high>=s.tp2:b.low<=s.tp2;
+       if(stopHit&&(tp1Hit||tp2Hit)){
+         fresh.state='AMBIGUOUS';fresh.endReason='Same candle touched adverse and favorable barriers; OHLC cannot determine order';changed=true;break;
+       }
+       if(stopHit){fresh.state='STOPPED';fresh.endedAt=b.closeTime;changed=true;break;}
+       if(tp2Hit){fresh.state='TP2_HIT';fresh.endedAt=b.closeTime;changed=true;break;}
+       if(tp1Hit&&fresh.state!=='TP1_HIT'){fresh.state='TP1_HIT';fresh.tp1At=b.closeTime;changed=true;}
+     }
+   }
+   return fresh;
+ });
+ if(changed)saveScenarios(rows);
+}
+function lifecycleCard(symbol,frame){
+ const s=activeScenarioFor(symbol,frame.tf);
+ if(!s)return`<h2>Paper Scenario Lifecycle</h2><div class="hiddenLevels">لا يوجد سيناريو Paper نشط لهذا الفريم. يتم إنشاء سيناريو فقط عند Qualified أو Near‑Qualified.</div>`;
+ const side=s.side===1?'LONG / BULLISH':'SHORT / BEARISH';
+ const levelStrength=s.side===1?s.resistanceStrength:s.supportStrength;
+ const touches=s.side===1?s.resistanceTouches:s.supportTouches;
+ return`<div class="lifecycleTop"><div><h2>Paper Scenario Lifecycle</h2><div class="muted">${esc(side)} • ${esc(s.id)}</div></div><span class="lifecycleState ${scenarioStateClass(s.state)}">${esc(s.state)}</span></div>
+ <div class="scenarioGrid">
+   <div class="scenarioCell"><small>Original Entry Reference</small><b>${fmt(s.entry,6)}</b></div>
+   <div class="scenarioCell"><small>Stop</small><b>${fmt(s.stop,6)}</b></div>
+   <div class="scenarioCell"><small>TP1</small><b>${fmt(s.tp1,6)}</b></div>
+   <div class="scenarioCell"><small>TP2</small><b>${fmt(s.tp2,6)}</b></div>
+   <div class="scenarioCell"><small>Bars elapsed / expiry</small><b>${s.barCount||0} / ${s.expiryBars}</b></div>
+   <div class="scenarioCell"><small>Created Technical Score</small><b>${fmt(s.techAtCreation,1)}</b></div>
+ </div>
+ <div class="triggerBox"><b>Entry model:</b> ${esc(s.mode)}<br>
+ ${s.triggerMode.includes('RETEST')?`<b>Retest zone:</b> ${fmt(s.retestLow,6)} – ${fmt(s.retestHigh,6)}<br>`:''}
+ <b>Breakout/Breakdown level:</b> ${fmt(s.breakoutLevel,6)}<br>
+ <span class="muted">السيناريو القديم لا يُحذف عند إعادة التحليل. يبقى حتى Trigger / Invalidation / Expiry.</span></div>
+ <div class="levelStrength"><span class="levelTag">Level strength ${fmt(levelStrength,0)}/100</span><span class="levelTag">Historical touches ${touches}</span><span class="levelTag">${s.referenceOnly?'Reference / Near‑Qualified':'Qualified at creation'}</span></div>`;
+}
+function renderJournal(symbol){
+ const rows=loadScenarios().filter(x=>x.symbol===symbol).slice(-12).reverse();
+ if(!rows.length)return`<h2>Paper Scenario Journal</h2><div class="hiddenLevels">لا يوجد سجل بعد.</div>`;
+ return`<div class="journalActions"><button id="clearJournalBtn" class="smallBtn">مسح سجل Paper</button></div><h2>Paper Scenario Journal</h2>${rows.map(s=>`<div class="journalRow">
+   <div class="journalHead"><b>${esc(s.symbol)} — ${esc(s.tf)}</b><span class="lifecycleState ${scenarioStateClass(s.state)}">${esc(s.state)}</span></div>
+   <div class="journalMeta">${s.side===1?'Bullish':'Bearish'} • Entry ${fmt(s.entry,6)} • Stop ${fmt(s.stop,6)} • TP1 ${fmt(s.tp1,6)} • TP2 ${fmt(s.tp2,6)}<br>${esc(s.mode)}${s.endReason?'<br>'+esc(s.endReason):''}</div>
+ </div>`).join('')}`;
+}
+
+
 $('runLiveBtn').onclick=async()=>{
  const b=$('runLiveBtn');b.disabled=true;$('status').textContent='جاري جلب تاريخ أطول وتشغيل Purged Walk‑Forward على M15/H1/D1...';
  try{
@@ -323,10 +531,13 @@ $('runLiveBtn').onclick=async()=>{
      const a={...core,score,side,mtf,session:tf==='D1'?'N/A — Daily timeframe':core.session};cores[tf]={...a};
      $('status').textContent=`${tf}: Purged Walk‑Forward validation...`;
      const oos=purgedWalkForward(sets[i],tf,cfg.costBps),integrity=await liveIntegrity(symbol,market,a.price,sets[i]),veto=higherTfVeto(tf,side,cores);
-     const frame={tf,a,oos,integrity,veto,levels:side?paperLevels(a):null};frame.decision=finalDecision(frame,cfg);frame.near=frame.decision.status==='BLOCKED'&&nearQualified(frame,cfg);frames.push(frame);
+     const frame={tf,a,oos,integrity,veto,levels:side?paperLevels(a):null,candles:sets[i]};
+     frame.decision=finalDecision(frame,cfg);frame.near=frame.decision.status==='BLOCKED'&&nearQualified(frame,cfg);
+     updateScenarioLifecycle(symbol,frame,sets[i]);createScenarioIfNeeded(frame,sets[i],symbol);
+     frames.push(frame);
    }
    const dirs=frames.map(x=>x.a.side).filter(Boolean),agreement=dirs.length?Math.abs(dirs.reduce((q,x)=>q+x,0))/dirs.length:0,strength=mtfStrength(frames);
-   currentLive={symbol,market,ctx,frames,agreement,strength,cfg};renderLive();$('status').textContent='اكتمل V5.6.5: Purged Walk‑Forward + Decision Architecture.';
+   currentLive={symbol,market,ctx,frames,agreement,strength,cfg};renderLive();$('status').textContent='اكتمل V5.6.6: Purged Walk‑Forward + Decision Architecture.';
  }catch(e){$('status').textContent='خطأ: '+e.message;}finally{b.disabled=false;}
 };
 
@@ -390,7 +601,8 @@ function renderTf(){
  const needN=requiredSample(f.tf,currentLive.cfg),folds=f.oos.folds||[];
  $('tfHistorical').innerHTML=`<h2>2 — Purged Walk‑Forward Historical Validation</h2>
    ${a.side?`<div class="layerGrid">
-     <div class="layerMetric"><small>Side-specific Resolved N / Required</small><b class="${h.n>=needN?'enginePass':'engineFail'}">${h.n} / ${needN}</b></div>
+     <div class="layerMetric"><small>Resolved OOS N</small><b class="${h.n>=needN?'enginePass':'engineFail'}">${h.n}</b></div>
+     <div class="layerMetric"><small>Minimum Required</small><b>${needN}</b></div>
      <div class="layerMetric"><small>OOS Accuracy</small><b class="${h.acc>=currentLive.cfg.minAcc?'enginePass':'engineFail'}">${pct(h.acc)}</b></div>
      <div class="layerMetric"><small>Cost-adjusted Profit Factor</small><b class="${h.pf>=currentLive.cfg.minPF?'enginePass':'engineFail'}">${h.pf.toFixed(2)}</b></div>
      <div class="layerMetric"><small>Wilson 95% Lower Bound</small><b class="${h.wilson>=currentLive.cfg.minWilson?'enginePass':'engineFail'}">${pct(h.wilson)}</b></div>
@@ -410,6 +622,9 @@ function renderTf(){
    </div><div class="integrityFlags">${flags}</div>
    <p class="muted">Integrity بيانات حية؛ يمكنها حجب السيناريو إذا ساءت، لكنها لا تعيد حساب الاتجاه الفني قبل إغلاق الشمعة التالية.</p>`;
 
+ $('tfLifecycle').innerHTML=lifecycleCard(currentLive.symbol,f);
+ $('paperJournal').innerHTML=renderJournal(currentLive.symbol);
+ const clearBtn=$('clearJournalBtn');if(clearBtn)clearBtn.onclick=()=>{saveScenarios(loadScenarios().filter(x=>x.symbol!==currentLive.symbol));renderTf();};
  $('tfScenario').className=`card ${d.status==='BLOCKED'?'filterBlocked':'filterAllowed'}`;
  if(d.status==='BLOCKED'&&!f.near){
    $('tfScenario').innerHTML=`<h2>${f.tf} — Paper Scenario</h2><div class="decision block">BLOCKED</div><div class="hiddenLevels">النتيجة ليست قريبة بما يكفي من شروط التحقق، لذلك لا تُعرض مستويات مرجعية.</div>`;
@@ -418,10 +633,13 @@ function renderTf(){
    $('tfScenario').innerHTML=`<h2>${f.tf} — Paper Reference Scenario</h2>
      <div class="decision block">BLOCKED — NEAR-QUALIFIED</div><span class="referenceBadge">REFERENCE ONLY • NOT QUALIFIED</span>
      <div class="levels4"><div class="level"><small>Paper Reference Entry</small><strong>${fmt(L.entry,6)}</strong></div><div class="level"><small>Paper Reference Stop</small><strong>${fmt(L.stop,6)}</strong></div><div class="level"><small>Paper Reference TP1</small><strong>${fmt(L.tp1,6)}</strong><div class="rankTag">R:R ${rr1.toFixed(2)}</div></div><div class="level"><small>Paper Reference TP2</small><strong>${fmt(L.tp2,6)}</strong><div class="rankTag">R:R ${rr2.toFixed(2)}</div></div></div>
-     <div class="referenceScenario"><b>Entry model:</b> ${esc(L.mode)}<br><span class="muted">المستويات محسوبة من آخر شمعة مغلقة + S/R + ATR، لكنها لم تجتز كل فلاتر التحقق.</span></div>`;
+     <div class="referenceScenario"><b>Entry model:</b> ${esc(L.mode)}<br>
+     ${L.triggerMode.includes('RETEST')?`<b>Retest zone:</b> ${fmt(L.retestLow,6)} – ${fmt(L.retestHigh,6)}<br>`:''}
+     <b>Level strength:</b> ${a.side===1?fmt(L.resistanceStrength,0):fmt(L.supportStrength,0)}/100 • touches ${a.side===1?L.resistanceTouches:L.supportTouches}<br>
+     <span class="muted">المستويات محسوبة من آخر شمعة مغلقة + S/R + ATR. للمستويات القوية يفضّل النظام إغلاق الاختراق ثم Retest ناجح بدل مجرد لمس السعر فوق/تحت المستوى.</span></div>`;
  }else{
    const L=f.levels,risk=Math.abs(L.entry-L.stop),rr1=risk?Math.abs(L.tp1-L.entry)/risk:0,rr2=risk?Math.abs(L.tp2-L.entry)/risk:0;
-   $('tfScenario').innerHTML=`<h2>${f.tf} — Paper Scenario</h2><div class="decision allow">${d.status}</div><div class="levels4"><div class="level"><small>Paper Entry</small><strong>${fmt(L.entry,6)}</strong></div><div class="level"><small>Paper Stop</small><strong>${fmt(L.stop,6)}</strong></div><div class="level"><small>Paper TP1</small><strong>${fmt(L.tp1,6)}</strong><div class="rankTag">R:R ${rr1.toFixed(2)}</div></div><div class="level"><small>Paper TP2</small><strong>${fmt(L.tp2,6)}</strong><div class="rankTag">R:R ${rr2.toFixed(2)}</div></div></div><p class="muted">${esc(L.mode)} • Paper Research only.</p>`;
+   $('tfScenario').innerHTML=`<h2>${f.tf} — Paper Scenario</h2><div class="decision allow">${d.status}</div><div class="levels4"><div class="level"><small>Paper Entry</small><strong>${fmt(L.entry,6)}</strong></div><div class="level"><small>Paper Stop</small><strong>${fmt(L.stop,6)}</strong></div><div class="level"><small>Paper TP1</small><strong>${fmt(L.tp1,6)}</strong><div class="rankTag">R:R ${rr1.toFixed(2)}</div></div><div class="level"><small>Paper TP2</small><strong>${fmt(L.tp2,6)}</strong><div class="rankTag">R:R ${rr2.toFixed(2)}</div></div></div><div class="referenceScenario"><b>Entry model:</b> ${esc(L.mode)}<br>${L.triggerMode.includes('RETEST')?`<b>Retest zone:</b> ${fmt(L.retestLow,6)} – ${fmt(L.retestHigh,6)}<br>`:''}<span class="muted">Paper Research only.</span></div>`;
  }
 
  $('tfIndicators').innerHTML=`<h2>Indicator Detail</h2><div class="metrics">
@@ -429,7 +647,9 @@ function renderTf(){
    ${metric('RSI14',a.rsi.toFixed(2))}${metric('ADX14',a.adx.toFixed(2))}
    ${metric('MACD',fmt(a.macd,6))}${metric('MACD Signal',fmt(a.macdSignal,6))}
    ${metric('Volume/MA20',a.volumeRatio.toFixed(2)+'x')}
-   ${metric('Support',fmt(a.support,6))}${metric('Resistance',fmt(a.resistance,6))}${metric('ATR',fmt(a.atr,6))}
+   ${metric('Support',fmt(a.support,6))}${metric('Resistance',fmt(a.resistance,6))}
+   ${metric('Support Strength',fmt(a.supportStrength,0)+'/100')}${metric('Resistance Strength',fmt(a.resistanceStrength,0)+'/100')}
+   ${metric('Support Touches',a.supportTouches)}${metric('Resistance Touches',a.resistanceTouches)}${metric('ATR',fmt(a.atr,6))}
  </div>`;
 }
 

@@ -136,3 +136,26 @@ table{width:100%;border-collapse:collapse;min-width:760px}th,td{padding:9px 8px;
 .validationMeta small{display:block;color:#95a8ca}.validationMeta b{font-size:15px}
 .foldGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}.foldBox{background:#0b1729;border:1px solid #263e62;border-radius:10px;padding:7px;text-align:center}.foldBox small{display:block;color:#8fa3c7;font-size:9px}.foldBox b{font-size:13px}
 @media(max-width:800px){.validationMeta{grid-template-columns:1fr 1fr}.foldGrid{grid-template-columns:1fr 1fr}}
+
+/* V5.6.6 Scenario Lifecycle + Smart Retest Entry */
+.lifecycleTop{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:10px}
+.lifecycleState{display:inline-block;padding:7px 10px;border-radius:999px;font-weight:900;font-size:12px}
+.statePending{background:#352b18;border:1px solid #80662e;color:#ffd77e}
+.stateRetest{background:#25314a;border:1px solid #516c9a;color:#b9ceff}
+.stateTriggered{background:#12372f;border:1px solid #33806a;color:#7aebc6}
+.stateWin{background:#103a30;border:1px solid #2c9274;color:#77f0c7}
+.stateLoss{background:#3a1e29;border:1px solid #84384e;color:#ff9db0}
+.stateEnded{background:#2a2e38;border:1px solid #555e72;color:#bdc8dc}
+.statePaused{background:#362f1b;border:1px solid #77662c;color:#ffe08b}
+.scenarioGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.scenarioCell{background:#0c1a2f;border:1px solid #294165;border-radius:12px;padding:10px}
+.scenarioCell small{display:block;color:#94a7c9;margin-bottom:4px}.scenarioCell b{font-size:16px}
+.triggerBox{background:#0a1729;border:1px solid #31496e;border-radius:12px;padding:10px;line-height:1.7;margin-top:10px}
+.levelStrength{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.levelTag{padding:4px 8px;border-radius:999px;background:#17263e;border:1px solid #3a557d;color:#bdd0ef;font-size:10px}
+.journalRow{border:1px solid #263e62;border-radius:12px;padding:10px;margin:7px 0;background:#0a1729}
+.journalHead{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.journalMeta{font-size:10px;color:#93a6c8;margin-top:5px;line-height:1.6}
+.journalActions{display:flex;justify-content:flex-end;margin-bottom:8px}
+.smallBtn{border:1px solid #40587f;background:#13243e;color:#d8e5ff;border-radius:9px;padding:7px 10px}
+@media(max-width:800px){.scenarioGrid{grid-template-columns:1fr}}
