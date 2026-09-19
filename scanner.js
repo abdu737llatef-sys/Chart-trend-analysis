@@ -39,7 +39,7 @@ const FALLBACK_LARGE=['BTC','ETH','BNB','XRP','SOL','DOGE','ADA','TRX','AVAX','L
 const leveragedRe=/(UP|DOWN|BULL|BEAR|3L|3S)$/i;
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
-  const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.3',{updateViaCache:'none'});
+  const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.4',{updateViaCache:'none'});
   await reg.update();
 }catch(e){console.warn(e);}});
 
@@ -621,7 +621,7 @@ $('runScannerBtn').onclick=async()=>{
    ['scannerSummary','bullishCard','bearishCard','closestGrid','integrityCard','nearMissCard'].forEach(id=>$(id).classList.remove('hidden'));
 
    const lowIntegrity=good.filter(x=>!x.integrity.pass).length;
-   $('scannerSummary').innerHTML=`<h2>V5.6.3 Scanner Summary</h2><div class="metrics">
+   $('scannerSummary').innerHTML=`<h2>V5.6.4 Scanner Summary</h2><div class="metrics">
      ${metric('Market-cap source',esc(u.source))}
      ${metric('Eligible universe',candidates.length)}
      ${metric('Deep-scanned',deep.length)}

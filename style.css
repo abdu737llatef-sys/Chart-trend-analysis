@@ -100,3 +100,29 @@ table{width:100%;border-collapse:collapse;min-width:760px}th,td{padding:9px 8px;
   .decisionStats{grid-template-columns:repeat(2,1fr)}
   .desktopDetail{margin-top:8px}
 }
+
+/* V5.6.4 Decision Architecture */
+.architecture{display:grid;gap:8px}
+.archLayer{display:flex;gap:10px;align-items:center;background:#0b182b;border:1px solid #2b4267;border-radius:14px;padding:12px}
+.archLayer b{display:block;font-size:16px}.archLayer small{display:block;color:#9dafd0;line-height:1.6;margin-top:3px}
+.archNum{width:34px;height:34px;display:grid;place-items:center;border-radius:50%;background:#172d4a;border:1px solid #45658f;font-weight:900}
+.archArrow{text-align:center;color:#7998c9;font-size:20px}.finalLayer{border-color:#35705e}
+.layerGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.layerMetric{background:#0c1a2f;border:1px solid #2a4167;border-radius:12px;padding:10px}
+.layerMetric small{display:block;color:#95a8ca;margin-bottom:3px}.layerMetric b{font-size:18px}
+.compRow{display:grid;grid-template-columns:minmax(120px,1fr) 56px 70px;gap:8px;align-items:center;margin:8px 0}
+.compBar{height:8px;border-radius:99px;background:#20324f;overflow:hidden}.compBar>span{display:block;height:100%;background:#83a8ff}
+.weightTag{font-size:10px;color:#8fa4c8}
+.finalStatus{padding:14px;border-radius:14px;font-weight:900;font-size:20px;text-align:center;margin:10px 0}
+.statusBlocked{background:#321923;border:1px solid #7d354a;color:#ff9caf}
+.statusPrelim{background:#342b18;border:1px solid #79602d;color:#ffd27d}
+.statusConfirmed{background:#132d2a;border:1px solid #347161;color:#7cebc6}
+.statusHigh{background:#0e3430;border:1px solid #2e927a;color:#75f2c8}
+.enginePass{color:#69e9c0}.engineFail{color:#ff9dac}.engineWarn{color:#ffda7d}
+.lockLine{font-size:11px;color:#91a5c9;margin-top:8px}
+.reasonBox{background:#09162a;border:1px solid #2d456c;border-radius:12px;padding:10px;line-height:1.7}
+.hiddenLevels{padding:14px;text-align:center;border:1px dashed #694052;border-radius:12px;color:#dca0ae}
+.integrityFlags{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.integrityFlag{padding:3px 7px;border-radius:999px;background:#291923;border:1px solid #65354a;color:#f2a9b9;font-size:10px}
+.integrityOk{padding:3px 7px;border-radius:999px;background:#102923;border:1px solid #306b5c;color:#77e7c1;font-size:10px}
+@media(max-width:800px){.layerGrid{grid-template-columns:1fr}.compRow{grid-template-columns:minmax(105px,1fr) 52px 58px}}

@@ -1,72 +1,71 @@
-# Chart Trend Analyzer V5.6.3 — Signal Lock & Decision Cards
+# Chart Trend Analyzer V5.6.4 — Decision Architecture
 
-## أهم إصلاح
-في النسخ السابقة كان آخر Kline القادم من Binance قد يكون ما يزال مفتوحًا.
-على H1 مثلًا تتغير High/Low/Close/Volume/RSI/MACD/ADX طوال الساعة، ولذلك قد يتغير Score والاتجاه والمستويات قبل إغلاق الشمعة.
+## الفكرة الأساسية
+لم يعد OOS وIntegrity جزءًا من Technical Score.
+القرار النهائي يمر بثلاث طبقات مستقلة:
 
-V5.6.3:
-- يستبعد الشمعة المفتوحة من التحليل الفني.
-- Technical direction يُقفل على آخر شمعة مغلقة.
-- Paper Entry / Stop / TP1 / TP2 تُقفل لنفس الشمعة.
-- لا يعاد تحديد الاتجاه حتى تغلق الشمعة التالية.
-- Market Integrity يبقى Live ويمكنه فقط حجب المرشح إذا تدهورت السيولة/البيانات.
+1. Technical Engine
+2. Historical Validation Engine
+3. Market Integrity Engine
 
-## Strong Bullish / Strong Bearish الجديدة
-المرشح النهائي يجب أن يمر:
-1. Closed candle only
-2. Technical threshold
-3. MTF score
-4. Higher-timeframe veto
-5. OOS accuracy
-6. Minimum resolved OOS sample
-7. Wilson 95% lower confidence bound
-8. Profit Factor
-9. Integrity
-10. Depth / source agreement / anomaly checks
+## Technical Engine
+الأوزان:
+- Market Structure 25%
+- Trend: EMA + Ichimoku 20%
+- Momentum: RSI + MACD 12%
+- ADX/DI strength 10%
+- Volume/Participation 12%
+- Support/Resistance + Breakout/Retest 11%
+- MTF context 10%
+
+دمج EMA+Ichimoku وRSI+MACD يمنع احتساب نفس معلومة السعر كأدلة مستقلة كاملة.
+
+## MTF
+- M15: H1 هو السياق الأكبر الأساسي، وD1 سياق ثانوي.
+- H1: D1 هو Higher-TF veto الأساسي؛ M15 توقيت مساعد.
+- D1: H1/M15 سياق فقط ولا يوجد veto أعلى.
+
+## Historical Validation
+Side-specific:
+- Resolved N
+- OOS Accuracy
+- Profit Factor
+- Wilson 95% Lower Bound
 
 Defaults:
-- Bull >= 90
-- Bear <= 10
-- OOS accuracy >= 55%
+- N >= 50
+- Accuracy >= 55%
 - PF >= 1.20
-- Resolved N >= 30
-- Wilson 95% lower bound >= 50%
-- Integrity >= 80
+- Wilson95 >= 50%
 
-## Sample confidence
-- Preliminary: >=30 resolved, Wilson95 >=50%, PF>=1.20
-- Medium: >=50 resolved, Wilson95 >=50%, PF>=1.20
-- High: >=100 resolved, Wilson95 >=53%, PF>=1.30
+## Market Integrity
+Live:
+- Spread
+- Depth ±0.5%
+- Coinbase cross-source price when available
+- Closed-candle anomaly check
+- Coverage
 
-هذه ليست احتمالات نجاح للصفقة القادمة.
+Integrity can BLOCK a scenario but does not flip the locked technical direction inside the same candle.
 
-## Higher-TF veto
-- M15: H1 لا يجوز أن يكون قويًا في الاتجاه المعاكس.
-- H1: D1 لا يجوز أن يكون قويًا في الاتجاه المعاكس.
-- D1: لا يوجد veto أعلى في النسخة الحالية.
+## Final Status
+- BLOCKED: one or more minimum gates failed
+- PRELIMINARY: minimum gates passed but sample/statistical strength not enough for Confirmed
+- CONFIRMED: stronger history (N >=100)
+- HIGH CONFIDENCE: N >=100, Wilson>=53%, PF>=1.30, Integrity>=80 and strong technical score
 
-## Mobile Decision Cards
-لكل مرشح نهائي:
-- Verification
-- Live Integrity
-- OOS accuracy
-- Resolved N
-- Wilson95 lower bound
-- PF
-- MTF + Higher-TF status
-- Paper Entry
-- Paper Stop
-- Paper TP1
-- Paper TP2
-- R:R
-- وقت الشمعة التي تم قفل الإشارة عليها
+These labels are research confidence labels, not probabilities.
 
-## Closest lists
-تم إصلاح التكرار: العملة التي ظهرت في Strong Bullish/Bearish لن تظهر مرة أخرى في Top 3 Closest.
+## Closed Candle Lock
+Open candles are excluded from Technical analysis.
+Technical direction and Paper levels change only after the selected timeframe closes another candle.
 
-## Paper-only
-كل Entry / TP / Stop في التطبيق للمحاكاة والبحث فقط.
+## Paper levels
+If Final Status = BLOCKED:
+Paper Entry / TP1 / TP2 / Stop are hidden.
+
+Otherwise they are shown as Paper Research levels only.
 
 ## GitHub Pages
-https://YOURNAME.github.io/YOUR-REPO/?v=5.6.3
-https://YOURNAME.github.io/YOUR-REPO/scanner.html?v=5.6.3
+https://YOURNAME.github.io/YOUR-REPO/?v=5.6.4
+https://YOURNAME.github.io/YOUR-REPO/scanner.html?v=5.6.4
