@@ -1,68 +1,37 @@
-# Chart Trend Analyzer V5.6.6.1
-## Execution Integrity Fix
+# Chart Trend Analyzer V5.6.7
+## Historical Lifecycle Simulator + A/B Entry Validator
 
-هذه نسخة تصحيحية قبل V5.6.7 A/B Entry Validator.
+يحافظ V5.6.7 على دورة السيناريو الحية من V5.6.6.1 ويستخدم نفس مفتاح localStorage:
+`cta_v566_paper_scenarios`
 
-### 1. Direction Agreement
-المحايد لم يعد يُحذف من المقام.
-مثال:
-- M15 Neutral
-- H1 Bullish
-- D1 Bullish
+وبذلك يستمر سيناريو Paper القديم عند التحديث ما دام المستخدم لم يحذف بيانات الموقع.
 
-يعرض:
-- Direction Agreement = 66.7%
-- Directional Frames = 2/3
+## طرق الدخول
+A — Breakout Close:
+إغلاق بعد مستوى الاختراق/الكسر ثم Paper execution عند Open الشمعة التالية.
 
-بدل 100%.
+B — Breakout + Retest:
+إغلاق الاختراق ثم Retest ناجح وإغلاق تأكيدي ثم Paper execution عند Open الشمعة التالية.
 
-### 2. Expiry display
-تم فصل:
-- Bars elapsed
-- Maximum pending bars
+C — Adaptive:
+يستخدم منطق V5.6.6.1:
+- مستوى قوي أو Momentum/Volume غير كافيين -> Retest.
+- Momentum + Trend Strength + Volume قوية -> Continuation بدون Retest.
 
-لمنع انعكاس RTL مثل 8 / 0.
+## المقاييس
+Trigger rate, Resolved N, Win rate, PF after costs, Average net R, Wilson 95%, Max Drawdown R, Average bars to trigger, TP2 reach rate, Ambiguous OHLC.
 
-### 3. لماذا ينتظر Retest؟
-تم فصل السببين:
-- STRONG_LEVEL: مستوى قوي يحتاج إغلاق + Retest.
-- INSUFFICIENT_MOMENTUM_VOLUME: المستوى ليس قويًا بالضرورة، لكن الزخم/الحجم غير كافيين لقبول continuation.
+## Paired trade-off
+يحسب على نفس الإشارات:
+- خسائر A التي تم تجنبها لأن B لم يسمح بالدخول.
+- حركات A الرابحة التي ضاعت لأن B لم يحصل على Retest.
+- حالات دخلت فيها الطريقتان وتحولت النتيجة من خسارة إلى ربح أو العكس.
 
-إذا كان:
-Momentum >= 70
-ADX/DI strength >= 65
-Volume >= 60
-يمكن للنموذج اختيار closed-candle continuation بدون Retest عندما تسمح بقية الشروط.
+## Folds
+آخر ~60% من التاريخ مقسّم إلى 4 Chronological Folds مع Purge وlook-ahead buffer.
 
-### 4. Planned vs Actual Paper Trigger
-قبل التفعيل:
-- Planned Entry Reference
-- Planned Stop / TP1 / TP2
+## Execution integrity
+لا يستخدم Close شمعة التأكيد كسعر تعبئة.
+التنفيذ البحثي = Open الشمعة التالية.
 
-بعد شمعة تأكيد الاختراق أو Retest:
-الحالة تصبح READY_NEXT_OPEN.
-
-سعر التنفيذ البحثي:
-- Actual Paper Trigger = Open الشمعة التالية بعد شمعة التأكيد.
-
-هذا يمنع استخدام Close شمعة التأكيد نفسها كسعر تعبئة افتراضي بعد أن أصبح معلومًا.
-
-### 5. Effective levels
-بعد Actual Paper Trigger:
-- Effective Stop = مستوى الإبطال البنيوي المخطط
-- Effective TP1 = 1.20R من سعر التنفيذ الفعلي
-- Effective TP2 = 2.00R من سعر التنفيذ الفعلي
-
-ويحتفظ Journal بالمستويات المخططة والمستويات الفعلية للمقارنة.
-
-### 6. Lifecycle
-PENDING_BREAKOUT
-→ WAITING_RETEST (عند الحاجة)
-→ READY_NEXT_OPEN
-→ TRIGGERED
-→ TP1_HIT / TP2_HIT / STOPPED / INVALIDATED / EXPIRED / AMBIGUOUS
-
-### 7. ملاحظة
-لا توجد مراقبة Push في الخلفية في GitHub Pages.
-تتحدث الحالة عند فتح التطبيق أو تشغيل التحليل.
-كل المستويات Paper Research فقط.
+كل النتائج Paper Research فقط وليست توقعات أو تعليمات تداول حقيقية.

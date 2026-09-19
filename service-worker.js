@@ -1,5 +1,5 @@
-const CACHE='trend-v5-6-6-1-20260920';
-const CORE=['./style.css?v=5.6.6.1','./app.js?v=5.6.6.1','./scanner.html?v=5.6.6.1','./scanner.js?v=5.6.6.1','./manifest.webmanifest?v=5.6.6.1','./icon-192.png','./icon-512.png'];
+const CACHE='trend-v5-6-7-20260920';
+const CORE=['./style.css?v=5.6.7','./app.js?v=5.6.7','./scanner.html?v=5.6.7','./scanner.js?v=5.6.7','./manifest.webmanifest?v=5.6.7','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE)).catch(()=>{}));self.skipWaiting();});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
 self.addEventListener('fetch',e=>{

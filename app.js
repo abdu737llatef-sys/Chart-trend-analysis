@@ -2,7 +2,7 @@ const $=id=>document.getElementById(id);
 let deferredPrompt=null,currentLive=null,currentTf='H1';
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
- const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.6.1',{updateViaCache:'none'});await reg.update();
+ const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7',{updateViaCache:'none'});await reg.update();
 }catch(e){console.warn(e);}});
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('installBtn').classList.remove('hidden');});
 $('installBtn').onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('installBtn').classList.add('hidden');};
@@ -77,6 +77,11 @@ function migrateScenarioText(s){
  if((x.supportStrength||0)<65&&/strong support/i.test(x.mode||'')){
    x.mode='Closed-candle breakdown + retest required (momentum/volume confirmation was insufficient)';
  }
+ if(!x.entryReason&&/retest/i.test(x.mode||'')){
+   const level=(x.side===1?x.resistanceStrength:x.supportStrength)||0;
+   x.entryReason=level>=65?'STRONG_LEVEL':'INSUFFICIENT_MOMENTUM_VOLUME';
+ }
+ if(!x.entryReason&&/continuation/i.test(x.mode||''))x.entryReason='HIGH_MOMENTUM_CONTINUATION';
  return x;
 }
 function scenarioNextAction(s){
@@ -666,6 +671,131 @@ function renderJournal(symbol){
 }
 
 
+
+function researchInterval(tf){return tf==='M15'?'15m':tf==='H1'?'1h':'1d';}
+function researchHoldBars(tf){return tf==='M15'?32:tf==='H1'?24:12;}
+function researchMethodName(method){return method==='A'?'A — Breakout Close':method==='B'?'B — Breakout + Retest':'C — Adaptive Entry';}
+function nextBarOpenExecution(cs,confirmIndex,side,plan){
+ const execIndex=confirmIndex+1;if(execIndex>=cs.length)return null;
+ const actualEntry=cs[execIndex].open,eff=effectivePaperLevels({...plan,side},actualEntry);
+ return eff?{execIndex,...eff}:null;
+}
+function researchCostR(entry,risk,costBps){
+ const riskPct=risk/Math.max(Math.abs(entry),1e-12),costPct=costBps/10000;
+ return riskPct>0?costPct/riskPct:0;
+}
+function resolveResearchTrade(cs,exec,side,costBps,holdBars){
+ const long=side===1,entry=exec.actualEntry,stop=exec.effectiveStop,tp1=exec.effectiveTP1,tp2=exec.effectiveTP2,risk=exec.effectiveRisk;
+ const costR=researchCostR(entry,risk,costBps),end=Math.min(cs.length-1,exec.execIndex+holdBars);
+ for(let j=exec.execIndex;j<=end;j++){
+   const b=cs[j],stopHit=long?b.low<=stop:b.high>=stop,tp1Hit=long?b.high>=tp1:b.low<=tp1,tp2Hit=long?b.high>=tp2:b.low<=tp2;
+   if(stopHit&&(tp1Hit||tp2Hit))return{triggered:true,resolved:false,ambiguous:true,outcome:'AMBIGUOUS',r:null,tp2:false,exitIndex:j};
+   if(stopHit)return{triggered:true,resolved:true,ambiguous:false,outcome:'STOP',r:-(1+costR),tp2:false,exitIndex:j};
+   if(tp2Hit)return{triggered:true,resolved:true,ambiguous:false,outcome:'TP2',r:2-costR,tp2:true,exitIndex:j};
+   if(tp1Hit)return{triggered:true,resolved:true,ambiguous:false,outcome:'TP1',r:1.2-costR,tp2:false,exitIndex:j};
+ }
+ const last=cs[end],raw=(long?(last.close-entry):(entry-last.close))/Math.max(risk,1e-12);
+ return{triggered:true,resolved:true,ambiguous:false,outcome:'TIME_EXIT',r:raw-costR,tp2:false,exitIndex:end};
+}
+function simulateResearchMethod(cs,sig,method,tf,costBps){
+ const {i,side,plan}=sig,long=side===1,expiry=expiryBars(tf),hold=researchHoldBars(tf),maxEntry=Math.min(cs.length-2,i+expiry);
+ let breakoutIndex=-1,retestIndex=-1,confirmIndex=-1,triggerKind='',noTriggerReason='';
+ for(let j=i+1;j<=maxEntry;j++){const b=cs[j],ok=long?b.close>plan.breakoutLevel:b.close<plan.breakoutLevel;if(ok){breakoutIndex=j;break;}}
+ if(breakoutIndex<0)return{method,triggered:false,resolved:false,noTriggerReason:'NO_BREAKOUT',barsToTrigger:null};
+ const needsRetest=method==='B'||(method==='C'&&String(plan.triggerMode||'').includes('RETEST'));
+ if(!needsRetest){confirmIndex=breakoutIndex;triggerKind='BREAKOUT_CLOSE';}
+ else{
+   for(let j=breakoutIndex+1;j<=maxEntry;j++){
+     const b=cs[j],touch=b.low<=plan.retestHigh&&b.high>=plan.retestLow,holdLevel=long?b.close>plan.breakoutLevel:b.close<plan.breakoutLevel,failed=long?b.close<plan.stop:b.close>plan.stop;
+     if(failed){noTriggerReason='FAILED_RETEST';break;}
+     if(touch&&holdLevel){retestIndex=j;confirmIndex=j;triggerKind='RETEST_CLOSE';break;}
+   }
+   if(confirmIndex<0){
+     if(!noTriggerReason)noTriggerReason='NO_RETEST';
+     const after=cs.slice(breakoutIndex+1,Math.min(maxEntry+1,cs.length)),atrv=Math.max(sig.a.atr,sig.a.price*.002);
+     const continuation=after.some(b=>long?b.high>=cs[breakoutIndex].close+atrv:b.low<=cs[breakoutIndex].close-atrv);
+     return{method,triggered:false,resolved:false,noTriggerReason,breakoutIndex,retestIndex:-1,missedContinuation:continuation,barsToTrigger:null};
+   }
+ }
+ const exec=nextBarOpenExecution(cs,confirmIndex,side,plan);
+ if(!exec)return{method,triggered:false,resolved:false,noTriggerReason:'INVALID_NEXT_OPEN',breakoutIndex,retestIndex,confirmIndex,barsToTrigger:null};
+ const result=resolveResearchTrade(cs,exec,side,costBps,hold);
+ return{method,...result,breakoutIndex,retestIndex,confirmIndex,execIndex:exec.execIndex,actualEntry:exec.actualEntry,effectiveStop:exec.effectiveStop,effectiveTP1:exec.effectiveTP1,effectiveTP2:exec.effectiveTP2,triggerKind,barsToTrigger:exec.execIndex-i};
+}
+function maxDrawdownR(rows){
+ let eq=0,peak=0,maxdd=0;
+ for(const x of rows.filter(x=>x.resolved&&Number.isFinite(x.r)).sort((a,b)=>a.signalIndex-b.signalIndex)){eq+=x.r;peak=Math.max(peak,eq);maxdd=Math.max(maxdd,peak-eq);}
+ return maxdd;
+}
+function aggregateResearch(rows){
+ const triggered=rows.filter(x=>x.triggered),resolved=triggered.filter(x=>x.resolved&&Number.isFinite(x.r)),ambiguous=triggered.filter(x=>x.ambiguous);
+ const wins=resolved.filter(x=>x.r>0),losses=resolved.filter(x=>x.r<0),grossWin=wins.reduce((s,x)=>s+x.r,0),grossLoss=Math.abs(losses.reduce((s,x)=>s+x.r,0));
+ const pf=grossLoss?grossWin/grossLoss:(grossWin?99:0),acc=(wins.length+losses.length)?wins.length/(wins.length+losses.length):0,avgR=resolved.length?resolved.reduce((s,x)=>s+x.r,0)/resolved.length:0;
+ const bars=triggered.filter(x=>Number.isFinite(x.barsToTrigger)).map(x=>x.barsToTrigger),tp2=triggered.filter(x=>x.tp2).length,reasonCounts={};
+ rows.filter(x=>!x.triggered).forEach(x=>reasonCounts[x.noTriggerReason]=(reasonCounts[x.noTriggerReason]||0)+1);
+ return{signals:rows.length,triggered:triggered.length,triggerRate:rows.length?triggered.length/rows.length:0,resolved:resolved.length,wins:wins.length,losses:losses.length,accuracy:acc,pf,avgR,wilson:wilsonLower95(wins.length,wins.length+losses.length),maxDD:maxDrawdownR(rows),ambiguous:ambiguous.length,noTrigger:rows.length-triggered.length,tp2Rate:triggered.length?tp2/triggered.length:0,avgBarsToTrigger:bars.length?mean(bars):0,reasonCounts};
+}
+function researchFoldStats(rows){
+ return[0,1,2,3].map(f=>{const a=aggregateResearch(rows.filter(x=>x.fold===f));return{fold:f+1,n:a.resolved,pf:a.pf,avgR:a.avgR,acc:a.accuracy,triggered:a.triggered};});
+}
+function pairedResearchStats(records){
+ let fakeAvoided=0,missedWinners=0,retestImproved=0,retestWorsened=0,bothResolved=0;
+ for(const r of records){
+   const A=r.A,B=r.B;
+   if(A&&A.resolved&&A.r<0&&!(B&&B.triggered))fakeAvoided++;
+   if(A&&A.resolved&&A.r>0&&!(B&&B.triggered))missedWinners++;
+   if(A&&A.resolved&&B&&B.resolved){bothResolved++;if(A.r<0&&B.r>0)retestImproved++;if(A.r>0&&B.r<0)retestWorsened++;}
+ }
+ return{fakeAvoided,missedWinners,retestImproved,retestWorsened,bothResolved};
+}
+function buildHistoricalResearch(cs,tf,costBps){
+ const spec=validationSpec(tf),first=Math.max(330,Math.floor(cs.length*.40)),span=cs.length-first,foldSize=Math.floor(span/4),lookahead=expiryBars(tf)+researchHoldBars(tf)+3,records=[];
+ for(let f=0;f<4;f++){
+   const rawStart=first+f*foldSize,rawEnd=f===3?cs.length-1:first+(f+1)*foldSize-1,start=Math.max(330,rawStart+spec.purge),end=Math.min(cs.length-lookahead-1,rawEnd-lookahead);
+   if(end<=start)continue;
+   for(let i=start;i<=end;i+=spec.step){
+     const window=cs.slice(Math.max(0,i-319),i+1),a0=technicalCore(window),score=clamp(a0.baseScore/a0.baseWeight),side=score>=65?1:score<=35?-1:0;
+     if(!side||!Number.isFinite(a0.atr)||a0.atr<=0)continue;
+     const a={...a0,score,side},plan=paperLevels(a),sig={i,fold:f,a,side,plan},A=simulateResearchMethod(cs,sig,'A',tf,costBps),B=simulateResearchMethod(cs,sig,'B',tf,costBps),C=simulateResearchMethod(cs,sig,'C',tf,costBps);
+     for(const x of[A,B,C]){x.signalIndex=i;x.fold=f;x.side=side;x.signalScore=score;}
+     records.push({i,fold,side,score,plan,A,B,C});
+   }
+ }
+ const rowsA=records.map(r=>r.A),rowsB=records.map(r=>r.B),rowsC=records.map(r=>r.C);
+ return{records,A:{stats:aggregateResearch(rowsA),folds:researchFoldStats(rowsA)},B:{stats:aggregateResearch(rowsB),folds:researchFoldStats(rowsB)},C:{stats:aggregateResearch(rowsC),folds:researchFoldStats(rowsC)},paired:pairedResearchStats(records),adaptiveRetestCount:records.filter(r=>String(r.plan.triggerMode).includes('RETEST')).length,adaptiveCloseCount:records.filter(r=>!String(r.plan.triggerMode).includes('RETEST')).length};
+}
+function researchMetric(label,value,cls=''){return`<div class="methodMetric"><small>${label}</small><b class="${cls}">${value}</b></div>`;}
+function metricClassPositive(x,neutral=0){return x>neutral?'researchGood':x<neutral?'researchBad':'researchNeutral';}
+function renderResearchResult(symbol,tf,costBps,result,historyN){
+ for(const id of['researchSummary','researchCompare','researchPairs','researchFolds','researchLifecycle'])$(id).classList.remove('hidden');
+ $('researchSummary').innerHTML=`<h2>Historical Entry Research — ${esc(symbol)} ${tf}</h2><div class="metrics">${metric('Closed candles used',historyN)}${metric('Historical signals',result.records.length)}${metric('Research cost',costBps+' bps')}${metric('Execution model','Next candle open')}${metric('Adaptive chose Retest',result.adaptiveRetestCount)}${metric('Adaptive chose Close',result.adaptiveCloseCount)}</div><div class="researchWarning">هذا الاختبار يقارن طرق دخول على نفس الإشارات التاريخية. لا يوجد “فائز” تلقائي ولا تُعامل أي نتيجة كاحتمال للصفقة التالية. الهدف هو كشف trade-offs مثل Fake breakouts مقابل Missed moves.</div>`;
+ const methods=['A','B','C'];
+ $('researchCompare').innerHTML=`<h2>A/B/C Comparison</h2><div class="researchMethodGrid">${methods.map(m=>{const s=result[m].stats;return`<div class="methodCard"><span class="methodTag">${researchMethodName(m)}</span><div class="methodMetrics">${researchMetric('Signals',s.signals)}${researchMetric('Triggered',s.triggered)}${researchMetric('Trigger rate',pct(s.triggerRate))}${researchMetric('Resolved',s.resolved)}${researchMetric('Win rate',pct(s.accuracy),metricClassPositive(s.accuracy,.50))}${researchMetric('PF after costs',s.pf.toFixed(2),metricClassPositive(s.pf,1))}${researchMetric('Average net R',s.avgR.toFixed(3)+'R',metricClassPositive(s.avgR,0))}${researchMetric('Wilson 95%',pct(s.wilson),metricClassPositive(s.wilson,.50))}${researchMetric('Max drawdown',s.maxDD.toFixed(2)+'R')}${researchMetric('Avg bars to trigger',s.avgBarsToTrigger.toFixed(1))}${researchMetric('TP2 reached',pct(s.tp2Rate))}${researchMetric('Ambiguous OHLC',s.ambiguous)}</div></div>`;}).join('')}</div>
+ <div class="compareTableWrap"><table class="compareTable"><thead><tr><th>Metric</th><th>A: Breakout Close</th><th>B: Breakout + Retest</th><th>C: Adaptive</th></tr></thead><tbody>
+ ${[['PF after costs',result.A.stats.pf.toFixed(2),result.B.stats.pf.toFixed(2),result.C.stats.pf.toFixed(2)],['Average net R',result.A.stats.avgR.toFixed(3)+'R',result.B.stats.avgR.toFixed(3)+'R',result.C.stats.avgR.toFixed(3)+'R'],['Win rate',pct(result.A.stats.accuracy),pct(result.B.stats.accuracy),pct(result.C.stats.accuracy)],['Wilson 95%',pct(result.A.stats.wilson),pct(result.B.stats.wilson),pct(result.C.stats.wilson)],['Max drawdown',result.A.stats.maxDD.toFixed(2)+'R',result.B.stats.maxDD.toFixed(2)+'R',result.C.stats.maxDD.toFixed(2)+'R'],['Trigger rate',pct(result.A.stats.triggerRate),pct(result.B.stats.triggerRate),pct(result.C.stats.triggerRate)],['Avg bars to trigger',result.A.stats.avgBarsToTrigger.toFixed(1),result.B.stats.avgBarsToTrigger.toFixed(1),result.C.stats.avgBarsToTrigger.toFixed(1)]].map(r=>`<tr>${r.map((x,i)=>`<td>${i===0?esc(x):x}</td>`).join('')}</tr>`).join('')}
+ </tbody></table></div>`;
+ const q=result.paired;
+ $('researchPairs').innerHTML=`<h2>Paired Trade-off Analysis</h2><div class="pairedGrid"><div class="pairedBox"><small>A losses avoided because B did not trigger</small><b>${q.fakeAvoided}</b></div><div class="pairedBox"><small>A winning moves missed because B had no retest</small><b>${q.missedWinners}</b></div><div class="pairedBox"><small>Both triggered: Retest changed loss → gain</small><b>${q.retestImproved}</b></div><div class="pairedBox"><small>Both triggered: Retest changed gain → loss</small><b>${q.retestWorsened}</b></div></div><p class="muted">هذه المقارنة هي السبب في عدم افتراض أن Retest دائمًا أفضل أو أن Breakout Close دائمًا أفضل.</p>`;
+ $('researchFolds').innerHTML=`<h2>Chronological Fold Stability</h2>${methods.map(m=>`<div class="foldMethod"><h3>${researchMethodName(m)}</h3><div class="foldGrid">${result[m].folds.map(z=>`<div class="foldBox"><small>Fold ${z.fold}</small><b>${z.n?('PF '+z.pf.toFixed(2)):'N/A'}</b><small>Avg ${z.avgR.toFixed(3)}R • N ${z.n}</small></div>`).join('')}</div></div>`).join('')}<p class="muted">آخر نحو 60% من التاريخ مقسّم إلى 4 فترات زمنية مع Purge ومسافة كافية لدورة الدخول والخروج عند حدود كل Fold.</p>`;
+ $('researchLifecycle').innerHTML=`<h2>Historical Lifecycle State Machine</h2><div class="lifecycleFlow"><span class="flowState">SIGNAL</span><span class="flowArrow">→</span><span class="flowState">PENDING_BREAKOUT</span><span class="flowArrow">→</span><span class="flowState">WAITING_RETEST when required</span><span class="flowArrow">→</span><span class="flowState">READY_NEXT_OPEN</span><span class="flowArrow">→</span><span class="flowState">TRIGGERED</span><span class="flowArrow">→</span><span class="flowState">TP / STOP / TIME_EXIT / AMBIGUOUS</span></div><p class="muted">السيناريو الحي المخزّن يبقى مستقلًا ويستمر عبر التحديث طالما لم يتم حذف بيانات الموقع.</p>`;
+}
+async function runHistoricalResearch(){
+ const b=$('runResearchBtn');b.disabled=true;
+ const symbol=$('researchSymbol').value.trim().toUpperCase(),market=$('researchMarket').value,tf=$('researchTf').value,costBps=+$('researchCostBps').value,interval=researchInterval(tf),history=validationSpec(tf).history;
+ $('researchStatus').textContent=`جاري جلب ${history} شمعة مغلقة...`;
+ try{
+   const cs=await fetchHistory(symbol,interval,market,history);
+   if(cs.length<500)throw new Error('عدد الشموع المتاحة غير كافٍ للاختبار التاريخي.');
+   $('researchStatus').textContent='جاري محاكاة A/B/C عبر 4 فترات زمنية...';
+   await new Promise(r=>setTimeout(r,40));
+   const result=buildHistoricalResearch(cs,tf,costBps);
+   renderResearchResult(symbol,tf,costBps,result,cs.length);
+   $('researchStatus').textContent=`اكتمل V5.6.7 Historical Simulator — ${result.records.length} إشارة تاريخية مشتركة.`;
+ }catch(e){$('researchStatus').textContent='خطأ في Historical Simulator: '+e.message;}
+ finally{b.disabled=false;}
+}
+
+
 $('runLiveBtn').onclick=async()=>{
  const b=$('runLiveBtn');b.disabled=true;$('status').textContent='جاري جلب تاريخ أطول وتشغيل Purged Walk‑Forward على M15/H1/D1...';
  try{
@@ -689,7 +819,7 @@ $('runLiveBtn').onclick=async()=>{
    }
    const allSides=frames.map(x=>x.a.side||0),directionalCount=allSides.filter(x=>x!==0).length;
    const agreement=frames.length?Math.abs(allSides.reduce((q,x)=>q+x,0))/frames.length:0,strength=mtfStrength(frames);
-   currentLive={symbol,market,ctx,frames,agreement,directionalCount,strength,cfg};renderLive();$('status').textContent='اكتمل V5.6.6.1: Scenario Lifecycle + next-candle-open paper execution.';
+   currentLive={symbol,market,ctx,frames,agreement,directionalCount,strength,cfg};renderLive();$('status').textContent='اكتمل V5.6.7: Live Lifecycle + next-candle-open paper execution.';
  }catch(e){$('status').textContent='خطأ: '+e.message;}finally{b.disabled=false;}
 };
 
@@ -806,6 +936,8 @@ function renderTf(){
  </div>`;
 }
 
+if($('runResearchBtn'))$('runResearchBtn').onclick=runHistoricalResearch;
+try{saveScenarios(loadScenarios().map(migrateScenarioText));}catch{}
 window.addEventListener('load',()=>{
  try{
    const sym=new URLSearchParams(location.search).get('symbol');

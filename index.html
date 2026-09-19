@@ -6,17 +6,17 @@
   <meta name="theme-color" content="#06111f">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>Chart Trend Analyzer V5.6.6.1</title>
-  <link rel="manifest" href="manifest.webmanifest?v=5.6.6.1">
+  <title>Chart Trend Analyzer V5.6.7</title>
+  <link rel="manifest" href="manifest.webmanifest?v=5.6.7">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="style.css?v=5.6.6.1">
+  <link rel="stylesheet" href="style.css?v=5.6.7">
 </head>
 <body>
 <main class="wrap">
   <header class="topbar">
     <div>
-      <h1>Chart Trend Analyzer <span>V5.6.6.1</span></h1>
+      <h1>Chart Trend Analyzer <span>V5.6.7</span></h1>
       <p>Statistical Validation • Purged Walk‑Forward • Signal Lock • Paper Research</p>
     </div>
     <button id="installBtn" class="install hidden">تثبيت التطبيق</button>
@@ -24,10 +24,10 @@
 
   <section class="card scannerLaunch">
     <div>
-      <h2>Crypto Market Scanner V5.6.6.1</h2>
+      <h2>Crypto Market Scanner V5.6.7</h2>
       <p class="muted">Scanner منفصل لاختيار المرشحين الأقوى، بينما Live MTF يفصل بين التحليل الفني والتحقق التاريخي وسلامة السوق.</p>
     </div>
-    <a class="scannerLaunchBtn" href="scanner.html?v=5.6.6.1">فتح Market Scanner</a>
+    <a class="scannerLaunchBtn" href="scanner.html?v=5.6.7">فتح Market Scanner</a>
   </section>
 
   <section class="card">
@@ -98,8 +98,40 @@
     </div>
 
     <div id="researchControls" class="hidden">
-      <h2>Research Backtest</h2>
-      <p class="muted">الوضع التفصيلي للبحث التاريخي موجود في النسخ البحثية السابقة؛ V5.6.6.1 يركز على Decision Architecture المباشرة.</p>
+      <h2>V5.6.7 — A/B Entry & Historical Lifecycle Simulator</h2>
+      <p class="muted">يقارن نفس الإشارات التاريخية بين Breakout Close وBreakout + Retest وAdaptive Entry. التنفيذ البحثي يتم عند Open الشمعة التالية بعد التأكيد، وليس عند سعر Close المعروف بعد انتهاء الشمعة.</p>
+      <div class="formgrid">
+        <label>الرمز<input id="researchSymbol" value="ADAUSDT" placeholder="ADAUSDT"></label>
+        <label>السوق
+          <select id="researchMarket">
+            <option value="spot">Binance Spot</option>
+            <option value="futures">Binance USD‑M Futures</option>
+          </select>
+        </label>
+        <label>الفريم
+          <select id="researchTf">
+            <option value="M15">M15</option>
+            <option value="H1" selected>H1</option>
+            <option value="D1">D1</option>
+          </select>
+        </label>
+        <label>تكلفة بحثية Round-trip
+          <select id="researchCostBps">
+            <option value="0">0 bps</option>
+            <option value="5">5 bps</option>
+            <option value="10" selected>10 bps</option>
+            <option value="20">20 bps</option>
+          </select>
+        </label>
+      </div>
+      <button id="runResearchBtn" class="primary">تشغيل A/B Historical Simulator</button>
+      <p class="muted">المقارنة تعزل طريقة الدخول قدر الإمكان. لا تختار طريقة للتداول الحقيقي ولا تعتبر النسب احتمالات مستقبلية.</p>
+      <div id="researchStatus"></div>
+      <section id="researchSummary" class="researchBlock hidden"></section>
+      <section id="researchCompare" class="researchBlock hidden"></section>
+      <section id="researchPairs" class="researchBlock hidden"></section>
+      <section id="researchFolds" class="researchBlock hidden"></section>
+      <section id="researchLifecycle" class="researchBlock hidden"></section>
     </div>
   </section>
 
@@ -122,7 +154,7 @@
   </section>
 
   <section class="card architectureCard">
-    <h2>V5.6.6.1 Decision Architecture</h2>
+    <h2>V5.6.7 Decision Architecture</h2>
     <div class="architecture">
       <div class="archLayer">
         <span class="archNum">1</span>
@@ -131,7 +163,7 @@
       <div class="archArrow">↓</div>
       <div class="archLayer">
         <span class="archNum">2</span>
-        <div><b>Historical Validation Engine</b><small>Purged Walk‑Forward • OOS Accuracy • Resolved N • Cost-adjusted PF • Wilson 95%</small></div>
+        <div><b>Historical Validation Engine</b><small>Purged Walk‑Forward • OOS Accuracy • Resolved N • Cost-adjusted PF • Wilson 95% • A/B Entry Simulator</small></div>
       </div>
       <div class="archArrow">↓</div>
       <div class="archLayer">
@@ -147,6 +179,6 @@
     <p class="muted">Technical Score ليس احتمال نجاح. عند BLOCKED القريب فقط يمكن عرض Paper Reference Entry/TP/Stop بوضوح على أنها غير مؤهلة وليست إشارة تنفيذ.</p>
   </section>
 </main>
-<script src="app.js?v=5.6.6.1"></script>
+<script src="app.js?v=5.6.7"></script>
 </body>
 </html>
