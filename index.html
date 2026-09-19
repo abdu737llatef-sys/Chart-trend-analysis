@@ -6,28 +6,28 @@
   <meta name="theme-color" content="#06111f">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>Chart Trend Analyzer V5.6.4</title>
-  <link rel="manifest" href="manifest.webmanifest?v=5.6.4">
+  <title>Chart Trend Analyzer V5.6.5</title>
+  <link rel="manifest" href="manifest.webmanifest?v=5.6.5">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="style.css?v=5.6.4">
+  <link rel="stylesheet" href="style.css?v=5.6.5">
 </head>
 <body>
 <main class="wrap">
   <header class="topbar">
     <div>
-      <h1>Chart Trend Analyzer <span>V5.6.4</span></h1>
-      <p>Decision Architecture • Closed Candle • M15 / H1 / D1 • Paper Research</p>
+      <h1>Chart Trend Analyzer <span>V5.6.5</span></h1>
+      <p>Statistical Validation • Purged Walk‑Forward • Signal Lock • Paper Research</p>
     </div>
     <button id="installBtn" class="install hidden">تثبيت التطبيق</button>
   </header>
 
   <section class="card scannerLaunch">
     <div>
-      <h2>Crypto Market Scanner V5.6.4</h2>
+      <h2>Crypto Market Scanner V5.6.5</h2>
       <p class="muted">Scanner منفصل لاختيار المرشحين الأقوى، بينما Live MTF يفصل بين التحليل الفني والتحقق التاريخي وسلامة السوق.</p>
     </div>
-    <a class="scannerLaunchBtn" href="scanner.html?v=5.6.4">فتح Market Scanner</a>
+    <a class="scannerLaunchBtn" href="scanner.html?v=5.6.5">فتح Market Scanner</a>
   </section>
 
   <section class="card">
@@ -46,7 +46,13 @@
             <option value="futures">Binance USD‑M Futures</option>
           </select>
         </label>
-        <label>أقل OOS Resolved N
+        <label>قاعدة حجم العينة
+          <select id="liveSampleRule">
+            <option value="auto" selected>Auto: M15 80 / H1 50 / D1 30</option>
+            <option value="custom">Custom minimum</option>
+          </select>
+        </label>
+        <label>Custom OOS N
           <select id="liveMinSample">
             <option value="30">30</option>
             <option value="50" selected>50</option>
@@ -78,6 +84,14 @@
             <option value="0.55">55%</option>
           </select>
         </label>
+        <label>تكلفة بحثية Round-trip
+          <select id="liveCostBps">
+            <option value="0">0 bps</option>
+            <option value="5">5 bps</option>
+            <option value="10" selected>10 bps</option>
+            <option value="20">20 bps</option>
+          </select>
+        </label>
       </div>
       <button id="runLiveBtn" class="primary">تحليل شامل الآن</button>
       <p class="muted">التحليل الفني يستخدم آخر شمعة مغلقة فقط. Market Integrity يبقى Live، ويمكنه الحجب لكنه لا يقلب الاتجاه الفني داخل نفس الشمعة.</p>
@@ -85,7 +99,7 @@
 
     <div id="researchControls" class="hidden">
       <h2>Research Backtest</h2>
-      <p class="muted">الوضع التفصيلي للبحث التاريخي موجود في النسخ البحثية السابقة؛ V5.6.4 يركز على Decision Architecture المباشرة.</p>
+      <p class="muted">الوضع التفصيلي للبحث التاريخي موجود في النسخ البحثية السابقة؛ V5.6.5 يركز على Decision Architecture المباشرة.</p>
     </div>
   </section>
 
@@ -106,7 +120,7 @@
   </section>
 
   <section class="card architectureCard">
-    <h2>V5.6.4 Decision Architecture</h2>
+    <h2>V5.6.5 Decision Architecture</h2>
     <div class="architecture">
       <div class="archLayer">
         <span class="archNum">1</span>
@@ -115,7 +129,7 @@
       <div class="archArrow">↓</div>
       <div class="archLayer">
         <span class="archNum">2</span>
-        <div><b>Historical Validation Engine</b><small>OOS Accuracy • Resolved N • Profit Factor • Wilson 95% • Side-specific validation</small></div>
+        <div><b>Historical Validation Engine</b><small>Purged Walk‑Forward • OOS Accuracy • Resolved N • Cost-adjusted PF • Wilson 95%</small></div>
       </div>
       <div class="archArrow">↓</div>
       <div class="archLayer">
@@ -125,12 +139,12 @@
       <div class="archArrow">↓</div>
       <div class="archLayer finalLayer">
         <span class="archNum">✓</span>
-        <div><b>Final Status</b><small>BLOCKED • PRELIMINARY • CONFIRMED • HIGH CONFIDENCE</small></div>
+        <div><b>Final Status</b><small>BLOCKED • NEAR-QUALIFIED • PRELIMINARY • CONFIRMED • HIGH CONFIDENCE</small></div>
       </div>
     </div>
-    <p class="muted">Technical Score ليس احتمال نجاح. Entry/Stop/TP تظهر فقط عندما لا تكون الحالة BLOCKED، وتبقى مستويات Paper Research وليست أوامر تداول حقيقية.</p>
+    <p class="muted">Technical Score ليس احتمال نجاح. عند BLOCKED القريب فقط يمكن عرض Paper Reference Entry/TP/Stop بوضوح على أنها غير مؤهلة وليست إشارة تنفيذ.</p>
   </section>
 </main>
-<script src="app.js?v=5.6.4"></script>
+<script src="app.js?v=5.6.5"></script>
 </body>
 </html>

@@ -2,7 +2,7 @@ const $=id=>document.getElementById(id);
 let deferredPrompt=null,currentLive=null,currentTf='H1';
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
- const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.4',{updateViaCache:'none'});await reg.update();
+ const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.5',{updateViaCache:'none'});await reg.update();
 }catch(e){console.warn(e);}});
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('installBtn').classList.remove('hidden');});
 $('installBtn').onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('installBtn').classList.add('hidden');};
@@ -35,6 +35,13 @@ function ichimoku(cs){const mid=(i,p)=>{if(i<p-1)return null;let hi=-Infinity,lo
 function confirmedPivots(cs,l=3,r=3){const hs=[],ls=[];for(let i=l;i<cs.length-r;i++){let h=true,lo=true;for(let j=i-l;j<=i+r;j++){if(j===i)continue;if(cs[j].high>=cs[i].high)h=false;if(cs[j].low<=cs[i].low)lo=false;}if(h)hs.push({i,confirmed:i+r,price:cs[i].high});if(lo)ls.push({i,confirmed:i+r,price:cs[i].low});}return{hs,ls};}
 function lastNN(a){for(let i=a.length-1;i>=0;i--)if(a[i]!=null&&Number.isFinite(a[i]))return a[i];return null;}
 function wilsonLower95(wins,n){if(!n)return 0;const z=1.96,p=wins/n,z2=z*z,den=1+z2/n;return(p+z2/(2*n)-z*Math.sqrt((p*(1-p)+z2/(4*n))/n))/den;}
+function validationSpec(tf){
+ if(tf==='M15')return{history:4000,minN:80,step:4,horizon:16,purge:16,folds:4};
+ if(tf==='H1')return{history:4000,minN:50,step:3,horizon:12,purge:12,folds:4};
+ return{history:2500,minN:30,step:1,horizon:8,purge:8,folds:4};
+}
+function requiredSample(tf,cfg){return cfg.sampleRule==='auto'?validationSpec(tf).minN:cfg.minSample;}
+
 
 function technicalCore(cs){
  const c=cs.map(x=>x.close),v=cs.map(x=>x.volume||0),e20=ema(c,20),e50=ema(c,50),e200=ema(c,200),R=rsi(c),A=adx(cs),M=macd(c),I=ichimoku(cs),AT=atr(cs),vma=sma(v,20),piv=confirmedPivots(cs),last=cs.at(-1),i=cs.length-1;
@@ -113,6 +120,11 @@ function mtfComponent(tf,cores){
  if(tf==='H1')return cores.D1.baseScore*.80+cores.M15.baseScore*.20;
  return cores.H1.baseScore*.80+cores.M15.baseScore*.20;
 }
+function mtfStrength(frames){
+ const m=Object.fromEntries(frames.map(x=>[x.tf,x.a.score]));
+ return (m.M15??50)*.20+(m.H1??50)*.50+(m.D1??50)*.30;
+}
+
 function higherTfVeto(tf,side,cores){
  if(!side)return false;
  if(tf==='M15'){
@@ -126,31 +138,44 @@ function higherTfVeto(tf,side,cores){
  return false;
 }
 
-function barrierOutcome(cs,i,dir,atrv,h=12){
- const e=cs[i].close,F=dir===1?e+atrv:e-atrv,A=dir===1?e-atrv:e+atrv;
+function barrierOutcomeDetailed(cs,i,dir,atrv,h=12,costBps=10){
+ const entry=cs[i].close,F=dir===1?entry+atrv:entry-atrv,A=dir===1?entry-atrv:entry+atrv;
+ const riskPct=atrv/Math.max(entry,1e-12),costPct=costBps/10000,costR=riskPct>0?costPct/riskPct:0;
  for(let j=i+1;j<=Math.min(cs.length-1,i+h);j++){
    const fav=dir===1?cs[j].high>=F:cs[j].low<=F,adv=dir===1?cs[j].low<=A:cs[j].high>=A;
-   if(fav&&adv)return'amb'; if(fav)return'win'; if(adv)return'loss';
+   if(fav&&adv)return{out:'amb',r:null};
+   if(fav)return{out:'win',r:1-costR};
+   if(adv)return{out:'loss',r:-(1+costR)};
  }
- return'timeout';
+ return{out:'timeout',r:null};
 }
-function quickOOS(cs){
- const AT=atr(cs),rows=[];
- for(let i=240;i<cs.length-13;i+=2){
-   const a=technicalCore(cs.slice(Math.max(0,i-299),i+1));
-   const score=a.baseScore/a.baseWeight;
-   const dir=score>=65?1:score<=35?-1:0;
-   if(!dir)continue;
-   rows.push({dir,out:barrierOutcome(cs,i,dir,AT[i])});
+function purgedWalkForward(cs,tf,costBps=10){
+ const spec=validationSpec(tf),AT=atr(cs),rows=[],warmup=260;
+ for(let i=warmup;i<cs.length-spec.horizon;i+=spec.step){
+   const window=cs.slice(Math.max(0,i-319),i+1),a=technicalCore(window);
+   const score=a.baseScore/a.baseWeight,dir=score>=65?1:score<=35?-1:0;
+   if(!dir||!AT[i])continue;
+   const o=barrierOutcomeDetailed(cs,i,dir,AT[i],spec.horizon,costBps);
+   if(o.out==='amb'||o.out==='timeout')continue;
+   rows.push({i,dir,out:o.out,r:o.r});
  }
- const test=rows.slice(Math.floor(rows.length*.70));
+ const first=Math.floor(cs.length*.40),span=cs.length-first,foldSize=Math.floor(span/spec.folds),testRows=[];
+ const foldStats=[];
+ for(let f=0;f<spec.folds;f++){
+   const rawStart=first+f*foldSize,rawEnd=f===spec.folds-1?cs.length-1:first+(f+1)*foldSize-1;
+   const start=rawStart+spec.purge,end=rawEnd-spec.horizon;
+   const fold=rows.filter(x=>x.i>=start&&x.i<=end);
+   testRows.push(...fold);
+   const n=fold.length,w=fold.filter(x=>x.out==='win').length,l=fold.filter(x=>x.out==='loss').length;
+   foldStats.push({n,acc:n?w/n:0});
+ }
  function side(dir){
-   const r=test.filter(x=>x.dir===dir&&(x.out==='win'||x.out==='loss'));
-   const wins=r.filter(x=>x.out==='win').length,losses=r.filter(x=>x.out==='loss').length,n=wins+losses;
-   const acc=n?wins/n:0,pf=losses?wins/losses:(wins?99:0),wilson=wilsonLower95(wins,n);
-   return{n,wins,losses,acc,pf,wilson};
+   const r=testRows.filter(x=>x.dir===dir),wins=r.filter(x=>x.out==='win').length,losses=r.filter(x=>x.out==='loss').length,n=wins+losses;
+   const gains=r.filter(x=>x.r>0).reduce((s,x)=>s+x.r,0),lossAbs=-r.filter(x=>x.r<0).reduce((s,x)=>s+x.r,0);
+   const acc=n?wins/n:0,pf=lossAbs>0?gains/lossAbs:(gains>0?99:0),wilson=wilsonLower95(wins,n),avgR=n?r.reduce((s,x)=>s+x.r,0)/n:0;
+   return{n,wins,losses,acc,pf,wilson,avgR};
  }
- return{long:side(1),short:side(-1)};
+ return{long:side(1),short:side(-1),folds:foldStats,spec,testN:testRows.length,costBps};
 }
 
 async function fetchHistory(symbol,interval,market,total=900){
@@ -239,17 +264,21 @@ async function marketContext(){
  return{btc:ba.baseScore/ba.baseWeight,eth:ea.baseScore/ea.baseWeight,score,direction:score>=60?'Bullish':score<=40?'Bearish':'Neutral'};
 }
 function paperLevels(a){
- const buffer=.10*a.atr;let entry,stop,tp1,tp2;
+ const atrv=Math.max(a.atr,a.price*.002),trigger=.08*atrv;let entry,stop,tp1,tp2,mode;
  if(a.side===1){
-   entry=Math.max(a.price,a.resistance+buffer);
-   stop=Math.min(a.support-buffer,entry-1.15*a.atr);
-   const risk=entry-stop;tp1=entry+risk;tp2=entry+2*risk;
+   if(a.price<a.resistance){entry=a.resistance+trigger;mode='Breakout confirmation above resistance';}
+   else{entry=Math.max(a.resistance+.03*atrv,a.price-.15*atrv);mode='Retest/continuation reference';}
+   const structural=a.support-.10*atrv;
+   let risk=entry-structural;risk=Math.max(.90*atrv,Math.min(risk,1.80*atrv));
+   stop=entry-risk;tp1=entry+1.20*risk;tp2=entry+2.00*risk;
  }else{
-   entry=Math.min(a.price,a.support-buffer);
-   stop=Math.max(a.resistance+buffer,entry+1.15*a.atr);
-   const risk=stop-entry;tp1=entry-risk;tp2=entry-2*risk;
+   if(a.price>a.support){entry=a.support-trigger;mode='Breakdown confirmation below support';}
+   else{entry=Math.min(a.support-.03*atrv,a.price+.15*atrv);mode='Retest/continuation reference';}
+   const structural=a.resistance+.10*atrv;
+   let risk=structural-entry;risk=Math.max(.90*atrv,Math.min(risk,1.80*atrv));
+   stop=entry+risk;tp1=entry-1.20*risk;tp2=entry-2.00*risk;
  }
- return{entry,stop,tp1,tp2};
+ return{entry,stop,tp1,tp2,mode};
 }
 function confidenceTier(hist,integrity,techScore){
  if(hist.n>=100&&hist.wilson>=.53&&hist.pf>=1.30&&integrity.score>=80&&(techScore>=80||techScore<=20))return'HIGH CONFIDENCE';
@@ -257,49 +286,47 @@ function confidenceTier(hist,integrity,techScore){
  return'PRELIMINARY';
 }
 function finalDecision(frame,cfg){
- const a=frame.a,h=a.side===1?frame.oos.long:frame.oos.short;
+ const a=frame.a,h=a.side===1?frame.oos.long:frame.oos.short,needN=requiredSample(frame.tf,cfg);
  const reasons=[];
  if(a.side===0)reasons.push('Technical direction is neutral');
  if(frame.veto)reasons.push('Higher-timeframe veto');
- if(a.side&&h.n<cfg.minSample)reasons.push(`OOS N ${h.n} < ${cfg.minSample}`);
+ if(a.side&&h.n<needN)reasons.push(`OOS N ${h.n} < ${needN}`);
  if(a.side&&h.acc<cfg.minAcc)reasons.push(`OOS accuracy ${(h.acc*100).toFixed(1)}% < ${(cfg.minAcc*100).toFixed(0)}%`);
- if(a.side&&h.pf<cfg.minPF)reasons.push(`PF ${h.pf.toFixed(2)} < ${cfg.minPF.toFixed(2)}`);
+ if(a.side&&h.pf<cfg.minPF)reasons.push(`Cost-adjusted PF ${h.pf.toFixed(2)} < ${cfg.minPF.toFixed(2)}`);
  if(a.side&&h.wilson<cfg.minWilson)reasons.push(`Wilson95 ${(h.wilson*100).toFixed(1)}% < ${(cfg.minWilson*100).toFixed(0)}%`);
  if(frame.integrity.score<70)reasons.push(`Integrity ${frame.integrity.score.toFixed(1)} < 70`);
  if(frame.integrity.coverage<.50)reasons.push(`Integrity coverage ${(frame.integrity.coverage*100).toFixed(0)}% < 50%`);
- if(reasons.length)return{status:'BLOCKED',reasons};
- return{status:confidenceTier(h,frame.integrity,a.score),reasons:['All minimum gates passed']};
+ if(reasons.length)return{status:'BLOCKED',reasons,needN};
+ return{status:confidenceTier(h,frame.integrity,a.score),reasons:['All minimum gates passed'],needN};
+}
+function nearQualified(frame,cfg){
+ const a=frame.a;if(!a.side||frame.veto||frame.integrity.score<70||frame.integrity.coverage<.50)return false;
+ const h=a.side===1?frame.oos.long:frame.oos.short,needN=requiredSample(frame.tf,cfg);
+ const gates=[h.n>=needN,h.acc>=cfg.minAcc,h.pf>=cfg.minPF,h.wilson>=cfg.minWilson];
+ const passed=gates.filter(Boolean).length;
+ const nClose=h.n>=Math.max(15,needN*.50),accClose=h.acc>=cfg.minAcc-.04,pfClose=h.pf>=Math.max(1,cfg.minPF-.20),wClose=h.wilson>=cfg.minWilson-.05;
+ return passed>=3 || (passed>=2&&nClose&&accClose&&pfClose&&wClose);
 }
 
 $('runLiveBtn').onclick=async()=>{
- const b=$('runLiveBtn');b.disabled=true;$('status').textContent='جاري تشغيل Technical → Historical → Integrity على M15/H1/D1...';
+ const b=$('runLiveBtn');b.disabled=true;$('status').textContent='جاري جلب تاريخ أطول وتشغيل Purged Walk‑Forward على M15/H1/D1...';
  try{
    const symbol=$('liveSymbol').value.trim().toUpperCase(),market=$('liveMarket').value;
-   const cfg={minSample:+$('liveMinSample').value,minAcc:+$('liveMinAcc').value,minPF:+$('liveMinPF').value,minWilson:+$('liveMinWilson').value};
-   const defs=[['M15','15m',1000],['H1','1h',1000],['D1','1d',700]];
+   const cfg={sampleRule:$('liveSampleRule').value,minSample:+$('liveMinSample').value,minAcc:+$('liveMinAcc').value,minPF:+$('liveMinPF').value,minWilson:+$('liveMinWilson').value,costBps:+$('liveCostBps').value};
+   const defs=[['M15','15m',validationSpec('M15').history],['H1','1h',validationSpec('H1').history],['D1','1d',validationSpec('D1').history]];
    const sets=await Promise.all(defs.map(x=>fetchHistory(symbol,x[1],market,x[2])));
    const ctx=await marketContext();
-
-   const cores={};
-   defs.forEach((d,i)=>cores[d[0]]=technicalCore(sets[i]));
+   const cores={};defs.forEach((d,i)=>cores[d[0]]=technicalCore(sets[i]));
    const frames=[];
    for(let i=0;i<defs.length;i++){
-     const tf=defs[i][0],core=cores[tf],mtf=mtfComponent(tf,cores);
-     const score=clamp(core.baseScore+mtf*.10);
-     const side=score>=65?1:score<=35?-1:0;
-     const a={...core,score,side,mtf};
-     cores[tf]={...core,score,side,mtf};
-     const oos=quickOOS(sets[i]);
-     const integrity=await liveIntegrity(symbol,market,a.price,sets[i]);
-     const veto=higherTfVeto(tf,side,cores);
-     const frame={tf,a,oos,integrity,veto,levels:side?paperLevels(a):null};
-     frame.decision=finalDecision(frame,cfg);
-     frames.push(frame);
+     const tf=defs[i][0],core=cores[tf],mtf=mtfComponent(tf,cores),score=clamp(core.baseScore+mtf*.10),side=score>=65?1:score<=35?-1:0;
+     const a={...core,score,side,mtf,session:tf==='D1'?'N/A — Daily timeframe':core.session};cores[tf]={...a};
+     $('status').textContent=`${tf}: Purged Walk‑Forward validation...`;
+     const oos=purgedWalkForward(sets[i],tf,cfg.costBps),integrity=await liveIntegrity(symbol,market,a.price,sets[i]),veto=higherTfVeto(tf,side,cores);
+     const frame={tf,a,oos,integrity,veto,levels:side?paperLevels(a):null};frame.decision=finalDecision(frame,cfg);frame.near=frame.decision.status==='BLOCKED'&&nearQualified(frame,cfg);frames.push(frame);
    }
-
-   const dirs=frames.map(x=>x.a.side).filter(Boolean),agreement=dirs.length?Math.abs(dirs.reduce((s,x)=>s+x,0))/dirs.length:0;
-   currentLive={symbol,market,ctx,frames,agreement,cfg};
-   renderLive();$('status').textContent='اكتمل التحليل متعدد الطبقات.';
+   const dirs=frames.map(x=>x.a.side).filter(Boolean),agreement=dirs.length?Math.abs(dirs.reduce((q,x)=>q+x,0))/dirs.length:0,strength=mtfStrength(frames);
+   currentLive={symbol,market,ctx,frames,agreement,strength,cfg};renderLive();$('status').textContent='اكتمل V5.6.5: Purged Walk‑Forward + Decision Architecture.';
  }catch(e){$('status').textContent='خطأ: '+e.message;}finally{b.disabled=false;}
 };
 
@@ -312,13 +339,14 @@ function renderLive(){
    ${metric('BTC H1 context',x.ctx.btc.toFixed(1))}
    ${metric('ETH H1 context',x.ctx.eth.toFixed(1))}
    ${metric('Market context',x.ctx.direction)}
-   ${metric('MTF directional agreement',(x.agreement*100).toFixed(0)+'%')}
+   ${metric('Direction Agreement',(x.agreement*100).toFixed(0)+'%')}
+   ${metric('Weighted MTF Strength',x.strength.toFixed(1)+'/100')}
  </div>`;
  $('mtfCards').innerHTML=x.frames.map(f=>`<div class="tfcard">
    <h3>${f.tf}</h3>
    <div class="direction ${f.a.side===1?'bullish':f.a.side===-1?'bearish':'neutral'}">${f.a.side===1?'BULLISH':f.a.side===-1?'BEARISH':'NEUTRAL'}</div>
    <div class="score">${f.a.score.toFixed(1)}</div>
-   <p class="muted">${f.a.session} • ${f.a.regime}</p>
+   <p class="muted">${f.tf==='D1'?f.a.regime:(f.a.session+' • '+f.a.regime)}</p>
    <div class="decision ${f.decision.status==='BLOCKED'?'block':'allow'}">${f.decision.status}</div>
  </div>`).join('');
  $('tfTabs').innerHTML=x.frames.map(f=>`<button class="tab ${f.tf===currentTf?'active':''}" data-tf="${f.tf}">${f.tf}</button>`).join('');
@@ -359,14 +387,17 @@ function renderTf(){
    ${compRow('MTF Context',a.mtf,10)}
    <div class="metrics">${metric('Technical Score',a.score.toFixed(1))}${metric('Direction threshold','Bull ≥65 / Bear ≤35')}</div>`;
 
- $('tfHistorical').innerHTML=`<h2>2 — Historical Validation Engine</h2>
+ const needN=requiredSample(f.tf,currentLive.cfg),folds=f.oos.folds||[];
+ $('tfHistorical').innerHTML=`<h2>2 — Purged Walk‑Forward Historical Validation</h2>
    ${a.side?`<div class="layerGrid">
-     <div class="layerMetric"><small>Side-specific Resolved N</small><b class="${h.n>=currentLive.cfg.minSample?'enginePass':'engineFail'}">${h.n}</b></div>
+     <div class="layerMetric"><small>Side-specific Resolved N / Required</small><b class="${h.n>=needN?'enginePass':'engineFail'}">${h.n} / ${needN}</b></div>
      <div class="layerMetric"><small>OOS Accuracy</small><b class="${h.acc>=currentLive.cfg.minAcc?'enginePass':'engineFail'}">${pct(h.acc)}</b></div>
-     <div class="layerMetric"><small>Profit Factor</small><b class="${h.pf>=currentLive.cfg.minPF?'enginePass':'engineFail'}">${h.pf.toFixed(2)}</b></div>
+     <div class="layerMetric"><small>Cost-adjusted Profit Factor</small><b class="${h.pf>=currentLive.cfg.minPF?'enginePass':'engineFail'}">${h.pf.toFixed(2)}</b></div>
      <div class="layerMetric"><small>Wilson 95% Lower Bound</small><b class="${h.wilson>=currentLive.cfg.minWilson?'enginePass':'engineFail'}">${pct(h.wilson)}</b></div>
-   </div>`:'<div class="hiddenLevels">لا يوجد اتجاه فني، لذلك لا يوجد Side-specific validation.</div>'}
-   <p class="muted">OOS هنا تحقق تاريخي مبسط على الجزء الأحدث من البيانات؛ لا يعني أن النتيجة القادمة ستنجح بنفس النسبة.</p>`;
+     <div class="layerMetric"><small>Average net R</small><b>${h.avgR.toFixed(3)}R</b></div>
+     <div class="layerMetric"><small>Research cost</small><b>${currentLive.cfg.costBps} bps</b></div>
+   </div><div class="foldGrid">${folds.map((z,i)=>`<div class="foldBox"><small>Fold ${i+1}</small><b>${z.n?((z.acc*100).toFixed(1)+'%'):'N/A'}</b><small>N ${z.n}</small></div>`).join('')}</div>`:'<div class="hiddenLevels">لا يوجد اتجاه فني، لذلك لا يوجد Side-specific validation.</div>'}
+   <p class="muted">تم فصل نوافذ الاختبار زمنيًا مع Purge حول الحدود وتقليل تداخل النتائج. هذه إحصاءات تاريخية وليست احتمالًا مضمونًا للنتيجة القادمة.</p>`;
 
  const flags=f.integrity.flags?.length?f.integrity.flags.map(x=>`<span class="integrityFlag">${esc(x)}</span>`).join(''):'<span class="integrityOk">No major live integrity flag</span>';
  $('tfIntegrity').innerHTML=`<h2>3 — Market Integrity Engine</h2>
@@ -380,20 +411,17 @@ function renderTf(){
    <p class="muted">Integrity بيانات حية؛ يمكنها حجب السيناريو إذا ساءت، لكنها لا تعيد حساب الاتجاه الفني قبل إغلاق الشمعة التالية.</p>`;
 
  $('tfScenario').className=`card ${d.status==='BLOCKED'?'filterBlocked':'filterAllowed'}`;
- if(d.status==='BLOCKED'){
-   $('tfScenario').innerHTML=`<h2>${f.tf} — Paper Scenario</h2>
-     <div class="decision block">BLOCKED</div>
-     <div class="hiddenLevels">تم إخفاء Paper Entry / TP1 / TP2 / Stop لأن السيناريو لم يجتز جميع الفلاتر الدنيا.</div>`;
+ if(d.status==='BLOCKED'&&!f.near){
+   $('tfScenario').innerHTML=`<h2>${f.tf} — Paper Scenario</h2><div class="decision block">BLOCKED</div><div class="hiddenLevels">النتيجة ليست قريبة بما يكفي من شروط التحقق، لذلك لا تُعرض مستويات مرجعية.</div>`;
+ }else if(d.status==='BLOCKED'&&f.near){
+   const L=f.levels,risk=Math.abs(L.entry-L.stop),rr1=risk?Math.abs(L.tp1-L.entry)/risk:0,rr2=risk?Math.abs(L.tp2-L.entry)/risk:0;
+   $('tfScenario').innerHTML=`<h2>${f.tf} — Paper Reference Scenario</h2>
+     <div class="decision block">BLOCKED — NEAR-QUALIFIED</div><span class="referenceBadge">REFERENCE ONLY • NOT QUALIFIED</span>
+     <div class="levels4"><div class="level"><small>Paper Reference Entry</small><strong>${fmt(L.entry,6)}</strong></div><div class="level"><small>Paper Reference Stop</small><strong>${fmt(L.stop,6)}</strong></div><div class="level"><small>Paper Reference TP1</small><strong>${fmt(L.tp1,6)}</strong><div class="rankTag">R:R ${rr1.toFixed(2)}</div></div><div class="level"><small>Paper Reference TP2</small><strong>${fmt(L.tp2,6)}</strong><div class="rankTag">R:R ${rr2.toFixed(2)}</div></div></div>
+     <div class="referenceScenario"><b>Entry model:</b> ${esc(L.mode)}<br><span class="muted">المستويات محسوبة من آخر شمعة مغلقة + S/R + ATR، لكنها لم تجتز كل فلاتر التحقق.</span></div>`;
  }else{
    const L=f.levels,risk=Math.abs(L.entry-L.stop),rr1=risk?Math.abs(L.tp1-L.entry)/risk:0,rr2=risk?Math.abs(L.tp2-L.entry)/risk:0;
-   $('tfScenario').innerHTML=`<h2>${f.tf} — Paper Scenario</h2>
-     <div class="decision allow">${d.status}</div>
-     <div class="levels4">
-       <div class="level"><small>Paper Entry</small><strong>${fmt(L.entry,6)}</strong></div>
-       <div class="level"><small>Paper Stop</small><strong>${fmt(L.stop,6)}</strong></div>
-       <div class="level"><small>Paper TP1</small><strong>${fmt(L.tp1,6)}</strong><div class="rankTag">R:R ${rr1.toFixed(2)}</div></div>
-       <div class="level"><small>Paper TP2</small><strong>${fmt(L.tp2,6)}</strong><div class="rankTag">R:R ${rr2.toFixed(2)}</div></div>
-     </div><p class="muted">هذه مستويات Paper Research مقفلة مع آخر شمعة مغلقة، وليست أوامر تداول حقيقية.</p>`;
+   $('tfScenario').innerHTML=`<h2>${f.tf} — Paper Scenario</h2><div class="decision allow">${d.status}</div><div class="levels4"><div class="level"><small>Paper Entry</small><strong>${fmt(L.entry,6)}</strong></div><div class="level"><small>Paper Stop</small><strong>${fmt(L.stop,6)}</strong></div><div class="level"><small>Paper TP1</small><strong>${fmt(L.tp1,6)}</strong><div class="rankTag">R:R ${rr1.toFixed(2)}</div></div><div class="level"><small>Paper TP2</small><strong>${fmt(L.tp2,6)}</strong><div class="rankTag">R:R ${rr2.toFixed(2)}</div></div></div><p class="muted">${esc(L.mode)} • Paper Research only.</p>`;
  }
 
  $('tfIndicators').innerHTML=`<h2>Indicator Detail</h2><div class="metrics">

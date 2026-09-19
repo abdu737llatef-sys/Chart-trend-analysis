@@ -101,7 +101,7 @@ table{width:100%;border-collapse:collapse;min-width:760px}th,td{padding:9px 8px;
   .desktopDetail{margin-top:8px}
 }
 
-/* V5.6.4 Decision Architecture */
+/* V5.6.5 Decision Architecture */
 .architecture{display:grid;gap:8px}
 .archLayer{display:flex;gap:10px;align-items:center;background:#0b182b;border:1px solid #2b4267;border-radius:14px;padding:12px}
 .archLayer b{display:block;font-size:16px}.archLayer small{display:block;color:#9dafd0;line-height:1.6;margin-top:3px}
@@ -126,3 +126,13 @@ table{width:100%;border-collapse:collapse;min-width:760px}th,td{padding:9px 8px;
 .integrityFlag{padding:3px 7px;border-radius:999px;background:#291923;border:1px solid #65354a;color:#f2a9b9;font-size:10px}
 .integrityOk{padding:3px 7px;border-radius:999px;background:#102923;border:1px solid #306b5c;color:#77e7c1;font-size:10px}
 @media(max-width:800px){.layerGrid{grid-template-columns:1fr}.compRow{grid-template-columns:minmax(105px,1fr) 52px 58px}}
+
+/* V5.6.5 statistical validation & blocked reference scenarios */
+.statusNear{background:#362a18;border:1px solid #80602c;color:#ffd17b}
+.referenceScenario{border:1px solid #76562d;background:#271f14;border-radius:14px;padding:12px;margin-top:10px}
+.referenceBadge{display:inline-block;padding:5px 9px;border-radius:999px;background:#402d16;border:1px solid #8e642b;color:#ffd17b;font-weight:900;font-size:11px}
+.validationMeta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:9px}
+.validationMeta>div{background:#0c1a2f;border:1px solid #2a4167;border-radius:11px;padding:8px}
+.validationMeta small{display:block;color:#95a8ca}.validationMeta b{font-size:15px}
+.foldGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}.foldBox{background:#0b1729;border:1px solid #263e62;border-radius:10px;padding:7px;text-align:center}.foldBox small{display:block;color:#8fa3c7;font-size:9px}.foldBox b{font-size:13px}
+@media(max-width:800px){.validationMeta{grid-template-columns:1fr 1fr}.foldGrid{grid-template-columns:1fr 1fr}}
