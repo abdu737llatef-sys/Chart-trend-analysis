@@ -2,7 +2,7 @@ const $=id=>document.getElementById(id);
 let deferredPrompt=null,currentLive=null,currentTf='H1';
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
- const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7',{updateViaCache:'none'});await reg.update();
+ const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.1',{updateViaCache:'none'});await reg.update();
 }catch(e){console.warn(e);}});
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('installBtn').classList.remove('hidden');});
 $('installBtn').onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('installBtn').classList.add('hidden');};
@@ -45,6 +45,8 @@ function scenarioStateClass(s){
  if(s==='TP1_HIT'||s==='TP2_HIT')return'stateWin';
  if(s==='STOPPED'||s==='INVALIDATED'||s==='AMBIGUOUS')return'stateLoss';
  if(s==='PAUSED_INTEGRITY')return'statePaused';
+ if(s==='PAUSED_TECHNICAL')return'stateTechPause';
+ if(s==='STALE_REVALIDATION')return'stateStale';
  return'stateEnded';
 }
 function expiryBars(tf){return tf==='M15'?16:tf==='H1'?8:5;}
@@ -98,6 +100,10 @@ function scenarioNextAction(s){
    return `تم تسجيل Actual Paper Trigger. تتم متابعة Effective Stop / TP1 / TP2 على الشموع المغلقة.`;
  if(s.state==='PAUSED_INTEGRITY')
    return `السيناريو موقوف مؤقتًا بسبب Market Integrity؛ لا يتم إنشاء Trigger جديد حتى عودة الحد الأدنى.`;
+ if(s.state==='PAUSED_TECHNICAL')
+   return `السيناريو محفوظ لكن Current Setup أصبح Neutral. لا يتم تفعيل اختراق جديد حتى يعود نفس الاتجاه الفني قبل انتهاء الصلاحية.`;
+ if(s.state==='STALE_REVALIDATION')
+   return `المستوى الحالي ابتعد كثيرًا عن مستوى السيناريو الأصلي. السيناريو محفوظ لكنه يحتاج Revalidation قبل السماح بتفعيل جديد.`;
  if(s.state==='EXPIRED')return 'انتهت صلاحية شرط الدخول قبل التفعيل.';
  if(s.state==='INVALIDATED')return 'تم إبطال الفكرة وفق شرط بنيوي أو Higher-TF veto.';
  return s.endReason||'يتم تتبع حالة السيناريو.';
@@ -161,10 +167,13 @@ function technicalCore(cs){
  else if(adxv>=20&&m>p)strength=30;
 
  const ah=piv.hs.filter(x=>x.confirmed<=i),al=piv.ls.filter(x=>x.confirmed<=i);
- let structure=50;
+ let structure=50,structureState='Unclear / transition';
  if(ah.length>=2&&al.length>=2){
    const hh=ah.at(-1).price>ah.at(-2).price,hl=al.at(-1).price>al.at(-2).price,lh=ah.at(-1).price<ah.at(-2).price,ll=al.at(-1).price<al.at(-2).price;
-   if(hh&&hl)structure=92; else if(lh&&ll)structure=8; else if(hh&&ll)structure=62; else if(lh&&hl)structure=38;
+   if(hh&&hl){structure=92;structureState='HH / HL — bullish structure';}
+   else if(lh&&ll){structure=8;structureState='LH / LL — bearish structure';}
+   else if(hh&&ll){structure=62;structureState='HH / LL — expanding / mixed';}
+   else if(lh&&hl){structure=38;structureState='LH / HL — compression';}
  }
 
  let volumeFlow=50;
@@ -202,10 +211,32 @@ function technicalCore(cs){
 
  return{
    price:last.close,components,baseScore,baseWeight,
-   structure,trend,momentum,strength,volumeFlow,srBreakout,
+   structure,structureState,trend,momentum,strength,volumeFlow,srBreakout,
    rsi:rv,adx:adxv,atr:atrv,ema20:E20,ema50:E50,ema200:E200,macd:mac,macdSignal:sig,volumeRatio:vr,
    support,resistance,resistanceTouches,supportTouches,resistanceStrength,supportStrength,session,regime,barTime:last.time,barCloseTime:last.closeTime
  };
+}
+
+
+function primaryTrendLabel(a){
+ if(a.trend>=65&&a.price>a.ema200)return'Bullish';
+ if(a.trend<=35&&a.price<a.ema200)return'Bearish';
+ if(a.trend>=60)return'Bullish bias';
+ if(a.trend<=40)return'Bearish bias';
+ return'Neutral';
+}
+function currentSetupLabel(a){
+ if(a.side===1)return a.structureState?.includes('HH / HL')?'Bullish continuation':'Bullish setup';
+ if(a.side===-1)return a.structureState?.includes('LH / LL')?'Bearish continuation':'Bearish setup';
+ if(a.structureState?.includes('compression'))return'Neutral / Compression';
+ if(a.structureState?.includes('mixed'))return'Neutral / Mixed structure';
+ return'Neutral';
+}
+function isTerminalScenarioState(s){
+ return['TP2_HIT','STOPPED','INVALIDATED','EXPIRED','AMBIGUOUS'].includes(s);
+}
+function isPreTriggerScenarioState(s){
+ return['PENDING_BREAKOUT','WAITING_RETEST','PAUSED_INTEGRITY','PAUSED_TECHNICAL','STALE_REVALIDATION'].includes(s);
 }
 
 function mtfComponent(tf,cores){
@@ -458,7 +489,7 @@ function confidenceTier(hist,integrity,techScore){
 function finalDecision(frame,cfg){
  const a=frame.a,h=a.side===1?frame.oos.long:frame.oos.short,needN=requiredSample(frame.tf,cfg);
  const reasons=[];
- if(a.side===0)reasons.push('Technical direction is neutral');
+ if(a.side===0)reasons.push('Current setup is neutral');
  if(frame.veto)reasons.push('Higher-timeframe veto');
  if(a.side&&h.n<needN)reasons.push(`OOS N ${h.n} < ${needN}`);
  if(a.side&&h.acc<cfg.minAcc)reasons.push(`OOS accuracy ${(h.acc*100).toFixed(1)}% < ${(cfg.minAcc*100).toFixed(0)}%`);
@@ -497,40 +528,93 @@ function createScenarioIfNeeded(frame,cs,symbol){
    expiryBars:expiryBars(frame.tf),barCount:0,
    resistanceStrength:L.resistanceStrength,supportStrength:L.supportStrength,
    resistanceTouches:L.resistanceTouches,supportTouches:L.supportTouches,
-   integrityAtCreation:frame.integrity.score,techAtCreation:frame.a.score,atrAtCreation:frame.a.atr
+   integrityAtCreation:frame.integrity.score,techAtCreation:frame.a.score,atrAtCreation:frame.a.atr,
+   primaryTrendAtCreation:primaryTrendLabel(frame.a),setupAtCreation:currentSetupLabel(frame.a),
+   supportAtCreation:frame.a.support,resistanceAtCreation:frame.a.resistance
  };
  rows.push(s);saveScenarios(rows);
 }
 function updateScenarioLifecycle(symbol,frame,cs,currentBar=null){
- let rows=loadScenarios(),changed=false;
+ let rows=loadScenarios();
  rows=rows.map(raw=>{
    let s=migrateScenarioText(raw);
-   if(s.symbol!==symbol||s.tf!==frame.tf||['TP2_HIT','STOPPED','INVALIDATED','EXPIRED','AMBIGUOUS'].includes(s.state))return s;
-   const bars=barsAfter(cs,s.createdBarCloseTime),fresh={...s,barCount:bars.length,lastUpdate:Date.now()};
+   if(s.symbol!==symbol||s.tf!==frame.tf||isTerminalScenarioState(s.state))return s;
+
+   const bars=barsAfter(cs,s.createdBarCloseTime);
+   const fresh={...s,barCount:bars.length,lastUpdate:Date.now()};
    if(!Number.isFinite(fresh.atrAtCreation))fresh.atrAtCreation=frame.a.atr;
-   if(!fresh.entryReason&&/retest/i.test(fresh.mode||'')){
-     fresh.entryReason=((fresh.side===1?fresh.resistanceStrength:fresh.supportStrength)||0)>=65?'STRONG_LEVEL':'INSUFFICIENT_MOMENTUM_VOLUME';
+
+   const currentLevel=fresh.side===1?frame.a.resistance:frame.a.support;
+   const currentAtr=Math.max(frame.a.atr||0,1e-12);
+   fresh.currentReferenceLevel=currentLevel;
+   fresh.levelDriftAbs=Math.abs(currentLevel-fresh.breakoutLevel);
+   fresh.levelDriftATR=fresh.levelDriftAbs/currentAtr;
+   fresh.revalidationRequired=fresh.levelDriftATR>=1.0;
+   fresh.currentTechnicalScore=frame.a.score;
+   fresh.currentPrimaryTrend=primaryTrendLabel(frame.a);
+   fresh.currentSetup=currentSetupLabel(frame.a);
+
+   if(bars.length>fresh.expiryBars&&isPreTriggerScenarioState(fresh.state)){
+     fresh.state='EXPIRED';
+     fresh.endReason='Entry condition did not trigger before expiry';
+     return fresh;
    }
 
-   if(bars.length>fresh.expiryBars&&['PENDING_BREAKOUT','WAITING_RETEST','PAUSED_INTEGRITY'].includes(fresh.state)){
-     fresh.state='EXPIRED';fresh.endReason='Entry condition did not trigger before expiry';changed=true;return fresh;
-   }
+   // Opposite confirmed technical side invalidates the original idea.
    if(frame.a.side&&frame.a.side!==fresh.side){
-     fresh.state='INVALIDATED';fresh.endReason='Closed-candle technical direction reversed';changed=true;return fresh;
+     fresh.state='INVALIDATED';
+     fresh.endReason='Closed-candle technical direction reversed';
+     return fresh;
    }
    if(frame.veto){
-     fresh.state='INVALIDATED';fresh.endReason='Higher-timeframe veto appeared';changed=true;return fresh;
+     fresh.state='INVALIDATED';
+     fresh.endReason='Higher-timeframe veto appeared';
+     return fresh;
    }
-   if(frame.integrity.score<60){
-     if(!['TRIGGERED','TP1_HIT','READY_NEXT_OPEN'].includes(fresh.state))fresh.state='PAUSED_INTEGRITY';
-     changed=true;
-   }else if(fresh.state==='PAUSED_INTEGRITY'){
-     fresh.state=['RETEST_AFTER_BREAKOUT','RETEST_AFTER_BREAKDOWN'].includes(fresh.triggerMode)?'WAITING_RETEST':'PENDING_BREAKOUT';changed=true;
+
+   // Once triggered, do not pause an existing paper execution because the setup later becomes neutral.
+   const alreadyTriggered=['TRIGGERED','TP1_HIT','READY_NEXT_OPEN'].includes(fresh.state);
+
+   if(!alreadyTriggered){
+     // Neutral current setup pauses, but does not erase, the prior scenario.
+     if(frame.a.side===0){
+       if(fresh.state!=='PAUSED_TECHNICAL'){
+         fresh.resumeState=['PENDING_BREAKOUT','WAITING_RETEST'].includes(fresh.state)?fresh.state:(fresh.resumeState||'PENDING_BREAKOUT');
+       }
+       fresh.state='PAUSED_TECHNICAL';
+       saveScenarios(rows); // harmless early persistence for mobile browsers
+       return fresh;
+     }
+
+     // Same side returned: first restore the prior stage.
+     if(fresh.state==='PAUSED_TECHNICAL'){
+       fresh.state=fresh.resumeState||'PENDING_BREAKOUT';
+     }
+
+     // If the current S/R reference drifted by >= 1 ATR, freeze entry activation until it reconverges.
+     if(fresh.revalidationRequired){
+       if(fresh.state!=='STALE_REVALIDATION'){
+         fresh.resumeState=['PENDING_BREAKOUT','WAITING_RETEST'].includes(fresh.state)?fresh.state:(fresh.resumeState||'PENDING_BREAKOUT');
+       }
+       fresh.state='STALE_REVALIDATION';
+       return fresh;
+     }else if(fresh.state==='STALE_REVALIDATION'&&fresh.levelDriftATR<0.75){
+       fresh.state=fresh.resumeState||'PENDING_BREAKOUT';
+     }
+
+     if(frame.integrity.score<60){
+       if(fresh.state!=='PAUSED_INTEGRITY'){
+         fresh.resumeState=['PENDING_BREAKOUT','WAITING_RETEST'].includes(fresh.state)?fresh.state:(fresh.resumeState||'PENDING_BREAKOUT');
+       }
+       fresh.state='PAUSED_INTEGRITY';
+       return fresh;
+     }else if(fresh.state==='PAUSED_INTEGRITY'){
+       fresh.state=fresh.resumeState||'PENDING_BREAKOUT';
+     }
    }
 
    const long=fresh.side===1;
 
-   // Stage 1: closed-candle breakout/breakdown confirmation.
    if(fresh.state==='PENDING_BREAKOUT'){
      for(const b of bars){
        const confirmed=long?b.close>fresh.breakoutLevel:b.close<fresh.breakoutLevel;
@@ -546,11 +630,10 @@ function updateScenarioLifecycle(symbol,frame,cs,currentBar=null){
          fresh.entryConfirmationBarTime=b.time;
          fresh.confirmationType='BREAKOUT_CLOSE';
        }
-       changed=true;break;
+       break;
      }
    }
 
-   // Stage 2: successful retest needs a touch plus a closed candle holding the broken level.
    if(fresh.state==='WAITING_RETEST'){
      const after=fresh.breakoutConfirmedAt||fresh.createdBarCloseTime;
      const retestBars=bars.filter(b=>b.closeTime>after);
@@ -559,7 +642,9 @@ function updateScenarioLifecycle(symbol,frame,cs,currentBar=null){
        const hold=long?b.close>fresh.breakoutLevel:b.close<fresh.breakoutLevel;
        const fail=long?b.close<fresh.stop:b.close>fresh.stop;
        if(fail){
-         fresh.state='INVALIDATED';fresh.endReason='Retest failed through structural invalidation';changed=true;break;
+         fresh.state='INVALIDATED';
+         fresh.endReason='Retest failed through structural invalidation';
+         break;
        }
        if(touch&&hold){
          fresh.state='READY_NEXT_OPEN';
@@ -567,18 +652,18 @@ function updateScenarioLifecycle(symbol,frame,cs,currentBar=null){
          fresh.entryConfirmationAt=b.closeTime;
          fresh.entryConfirmationBarTime=b.time;
          fresh.confirmationType='RETEST_CLOSE';
-         changed=true;break;
+         break;
        }
      }
    }
 
-   // Stage 3: use the NEXT candle OPEN as the research fill to avoid close-price look-ahead.
    if(fresh.state==='READY_NEXT_OPEN'&&Number.isFinite(fresh.entryConfirmationBarTime)){
      const execBar=nextExecutionBar(cs,currentBar,fresh.entryConfirmationBarTime);
      if(execBar){
        const eff=effectivePaperLevels(fresh,execBar.open);
        if(!eff){
-         fresh.state='INVALIDATED';fresh.endReason='Next-open execution produced invalid risk geometry';changed=true;
+         fresh.state='INVALIDATED';
+         fresh.endReason='Next-open execution produced invalid risk geometry';
        }else{
          fresh.state='TRIGGERED';
          fresh.actualEntry=eff.actualEntry;
@@ -590,12 +675,10 @@ function updateScenarioLifecycle(symbol,frame,cs,currentBar=null){
          fresh.triggerBarTime=execBar.time;
          fresh.executionModel='NEXT_CANDLE_OPEN_AFTER_CONFIRMATION';
          fresh.executionWasLiveOpen=!!execBar.isOpen;
-         changed=true;
        }
      }
    }
 
-   // Stage 4: outcome monitoring uses effective levels after actual trigger.
    if(fresh.state==='TRIGGERED'||fresh.state==='TP1_HIT'){
      const stop=Number.isFinite(fresh.effectiveStop)?fresh.effectiveStop:fresh.stop;
      const tp1=Number.isFinite(fresh.effectiveTP1)?fresh.effectiveTP1:fresh.tp1;
@@ -606,28 +689,39 @@ function updateScenarioLifecycle(symbol,frame,cs,currentBar=null){
        const tp1Hit=long?b.high>=tp1:b.low<=tp1;
        const tp2Hit=long?b.high>=tp2:b.low<=tp2;
        if(stopHit&&(tp1Hit||tp2Hit)){
-         fresh.state='AMBIGUOUS';fresh.endReason='Same candle touched adverse and favorable barriers; OHLC cannot determine intrabar order';changed=true;break;
+         fresh.state='AMBIGUOUS';
+         fresh.endReason='Same candle touched adverse and favorable barriers; OHLC cannot determine intrabar order';
+         break;
        }
-       if(stopHit){fresh.state='STOPPED';fresh.endedAt=b.closeTime;changed=true;break;}
-       if(tp2Hit){fresh.state='TP2_HIT';fresh.endedAt=b.closeTime;changed=true;break;}
-       if(tp1Hit&&fresh.state!=='TP1_HIT'){fresh.state='TP1_HIT';fresh.tp1At=b.closeTime;changed=true;}
+       if(stopHit){fresh.state='STOPPED';fresh.endedAt=b.closeTime;break;}
+       if(tp2Hit){fresh.state='TP2_HIT';fresh.endedAt=b.closeTime;break;}
+       if(tp1Hit&&fresh.state!=='TP1_HIT'){fresh.state='TP1_HIT';fresh.tp1At=b.closeTime;}
      }
    }
    return fresh;
  });
- if(changed)saveScenarios(rows);
-}
+ // Always persist: barCount, drift and current snapshot must update even when state did not change.
+ saveScenarios(rows);
+} 
 function lifecycleCard(symbol,frame){
  const raw=activeScenarioFor(symbol,frame.tf);
  if(!raw)return`<h2>Paper Scenario Lifecycle</h2><div class="hiddenLevels">لا يوجد سيناريو Paper نشط لهذا الفريم. يتم إنشاء سيناريو فقط عند Qualified أو Near‑Qualified.</div>`;
  const s=migrateScenarioText(raw),side=s.side===1?'LONG / BULLISH':'SHORT / BEARISH';
- const levelStrength=s.side===1?s.resistanceStrength:s.supportStrength;
- const touches=s.side===1?s.resistanceTouches:s.supportTouches;
+ const levelStrength=s.side===1?s.resistanceStrength:s.supportStrength,touches=s.side===1?s.resistanceTouches:s.supportTouches;
  const hasActual=Number.isFinite(s.actualEntry);
  const stop=hasActual?s.effectiveStop:s.stop,tp1=hasActual?s.effectiveTP1:s.tp1,tp2=hasActual?s.effectiveTP2:s.tp2;
+ const currentLevel=s.side===1?frame.a.resistance:frame.a.support;
+ const driftAbs=Math.abs(currentLevel-s.breakoutLevel),driftATR=driftAbs/Math.max(frame.a.atr||1e-12,1e-12);
  return`<div class="lifecycleTop"><div><h2>Paper Scenario Lifecycle</h2><div class="muted">${esc(side)} • ${esc(s.id)}</div></div><span class="lifecycleState ${scenarioStateClass(s.state)}">${esc(s.state)}</span></div>
 
- <div class="plannedBox"><b>Planned scenario at creation</b>
+ <div class="snapshotGrid">
+   <div class="snapshotCell"><small>Primary Trend at creation</small><b>${esc(s.primaryTrendAtCreation||'N/A')}</b></div>
+   <div class="snapshotCell"><small>Current Primary Trend</small><b>${esc(primaryTrendLabel(frame.a))}</b></div>
+   <div class="snapshotCell"><small>Setup at creation</small><b>${esc(s.setupAtCreation||'Bullish/Bearish setup')}</b></div>
+   <div class="snapshotCell"><small>Current Setup</small><b>${esc(currentSetupLabel(frame.a))}</b></div>
+ </div>
+
+ <div class="plannedBox"><b>Frozen planned scenario at creation</b>
    <div class="scenarioGrid">
      <div class="scenarioCell"><small>Planned Entry Reference</small><b>${fmt(s.entry,6)}</b></div>
      <div class="scenarioCell"><small>Planned Stop</small><b>${fmt(s.stop,6)}</b></div>
@@ -636,29 +730,30 @@ function lifecycleCard(symbol,frame){
    </div>
  </div>
 
- ${hasActual?`<div class="executionBox"><h3>Actual Paper Execution</h3>
-   <div class="scenarioGrid">
-     <div class="scenarioCell"><small>Actual Paper Trigger — next candle open</small><b>${fmt(s.actualEntry,6)}</b></div>
-     <div class="scenarioCell"><small>Effective Stop</small><b>${fmt(stop,6)}</b></div>
-     <div class="scenarioCell"><small>Effective TP1</small><b>${fmt(tp1,6)}</b></div>
-     <div class="scenarioCell"><small>Effective TP2</small><b>${fmt(tp2,6)}</b></div>
-   </div><div class="miniNote">Execution model: NEXT_CANDLE_OPEN_AFTER_CONFIRMATION. هذا يمنع اعتبار إغلاق شمعة التأكيد نفسه سعر تنفيذ افتراضي.</div></div>`:''}
+ ${hasActual?`<div class="executionBox"><h3>Actual Paper Execution</h3><div class="scenarioGrid">
+   <div class="scenarioCell"><small>Actual Paper Trigger — next candle open</small><b>${fmt(s.actualEntry,6)}</b></div>
+   <div class="scenarioCell"><small>Effective Stop</small><b>${fmt(stop,6)}</b></div>
+   <div class="scenarioCell"><small>Effective TP1</small><b>${fmt(tp1,6)}</b></div>
+   <div class="scenarioCell"><small>Effective TP2</small><b>${fmt(tp2,6)}</b></div>
+ </div><div class="miniNote">Execution model: NEXT_CANDLE_OPEN_AFTER_CONFIRMATION.</div></div>`:''}
 
  <div class="scenarioGrid" style="margin-top:10px">
    <div class="scenarioCell"><small>Bars elapsed</small><b>${s.barCount||0}</b></div>
    <div class="scenarioCell"><small>Maximum pending bars</small><b>${s.expiryBars}</b></div>
    <div class="scenarioCell"><small>Created Technical Score</small><b>${fmt(s.techAtCreation,1)}</b></div>
-   <div class="scenarioCell"><small>Current state</small><b>${esc(s.state)}</b></div>
+   <div class="scenarioCell"><small>Current Technical Score</small><b>${fmt(frame.a.score,1)}</b></div>
  </div>
 
  <div class="triggerBox"><b>Entry model:</b> ${esc(s.mode)}<br>
  ${s.triggerMode.includes('RETEST')?`<b>Retest zone:</b> ${fmt(s.retestLow,6)} – ${fmt(s.retestHigh,6)}<br>`:''}
- <b>Breakout/Breakdown level:</b> ${fmt(s.breakoutLevel,6)}<br>
- <b>Why this model:</b> ${esc(s.entryReason||'Adaptive level/momentum rule')}<br>
- <span class="muted">Planned levels remain in the journal; after confirmation the paper fill is recorded at the next candle open and Effective levels are calculated from that fill.</span></div>
+ <b>Original breakout/breakdown:</b> ${fmt(s.breakoutLevel,6)}<br>
+ <b>Current S/R reference:</b> ${fmt(currentLevel,6)}<br>
+ <b>Level drift:</b> ${fmt(driftAbs,6)} = ${fmt(driftATR,2)} ATR<br>
+ <b>Why this model:</b> ${esc(s.entryReason||'Adaptive level/momentum rule')}</div>
+
+ ${driftATR>=1?`<div class="revalidationWarn"><b>REVALIDATION REQUIRED</b><br>المستوى الحالي ابتعد عن مستوى السيناريو الأصلي بمقدار ${fmt(driftATR,2)} ATR. لا يتم تغيير المستوى القديم بصمت؛ يبقى محفوظًا للمقارنة.</div>`:''}
 
  <div class="nextAction"><b>Next action / الحالة المطلوبة:</b><br>${esc(scenarioNextAction(s))}</div>
-
  <div class="levelStrength"><span class="levelTag">Level strength ${fmt(levelStrength,0)}/100</span><span class="levelTag">Historical touches ${touches}</span><span class="levelTag">${s.referenceOnly?'Reference / Near‑Qualified':'Qualified at creation'}</span></div>`;
 }
 function renderJournal(symbol){
@@ -688,14 +783,23 @@ function resolveResearchTrade(cs,exec,side,costBps,holdBars){
  const long=side===1,entry=exec.actualEntry,stop=exec.effectiveStop,tp1=exec.effectiveTP1,tp2=exec.effectiveTP2,risk=exec.effectiveRisk;
  const costR=researchCostR(entry,risk,costBps),end=Math.min(cs.length-1,exec.execIndex+holdBars);
  for(let j=exec.execIndex;j<=end;j++){
-   const b=cs[j],stopHit=long?b.low<=stop:b.high>=stop,tp1Hit=long?b.high>=tp1:b.low<=tp1,tp2Hit=long?b.high>=tp2:b.low<=tp2;
-   if(stopHit&&(tp1Hit||tp2Hit))return{triggered:true,resolved:false,ambiguous:true,outcome:'AMBIGUOUS',r:null,tp2:false,exitIndex:j};
-   if(stopHit)return{triggered:true,resolved:true,ambiguous:false,outcome:'STOP',r:-(1+costR),tp2:false,exitIndex:j};
-   if(tp2Hit)return{triggered:true,resolved:true,ambiguous:false,outcome:'TP2',r:2-costR,tp2:true,exitIndex:j};
-   if(tp1Hit)return{triggered:true,resolved:true,ambiguous:false,outcome:'TP1',r:1.2-costR,tp2:false,exitIndex:j};
+   const b=cs[j],stopHit=long?b.low<=stop:b.high>=stop,tp1Hit=long?b.high>=tp1:b.low<=tp1;
+   if(stopHit&&tp1Hit)return{triggered:true,resolved:false,ambiguous:true,outcome:'AMBIGUOUS',r:null,tp2Potential:false,exitIndex:j};
+   if(stopHit)return{triggered:true,resolved:true,ambiguous:false,outcome:'STOP',r:-(1+costR),tp2Potential:false,exitIndex:j};
+   if(tp1Hit){
+     let tp2Potential=long?b.high>=tp2:b.low<=tp2;
+     if(!tp2Potential){
+       for(let k=j+1;k<=end;k++){
+         const z=cs[k];
+         if(long?z.high>=tp2:z.low<=tp2){tp2Potential=true;break;}
+       }
+     }
+     // A/B benchmark = full exit at TP1. TP2 is diagnostic only.
+     return{triggered:true,resolved:true,ambiguous:false,outcome:'TP1',r:1.2-costR,tp2Potential,exitIndex:j};
+   }
  }
  const last=cs[end],raw=(long?(last.close-entry):(entry-last.close))/Math.max(risk,1e-12);
- return{triggered:true,resolved:true,ambiguous:false,outcome:'TIME_EXIT',r:raw-costR,tp2:false,exitIndex:end};
+ return{triggered:true,resolved:true,ambiguous:false,outcome:'TIME_EXIT',r:raw-costR,tp2Potential:false,exitIndex:end};
 }
 function simulateResearchMethod(cs,sig,method,tf,costBps){
  const {i,side,plan}=sig,long=side===1,expiry=expiryBars(tf),hold=researchHoldBars(tf),maxEntry=Math.min(cs.length-2,i+expiry);
@@ -731,7 +835,7 @@ function aggregateResearch(rows){
  const triggered=rows.filter(x=>x.triggered),resolved=triggered.filter(x=>x.resolved&&Number.isFinite(x.r)),ambiguous=triggered.filter(x=>x.ambiguous);
  const wins=resolved.filter(x=>x.r>0),losses=resolved.filter(x=>x.r<0),grossWin=wins.reduce((s,x)=>s+x.r,0),grossLoss=Math.abs(losses.reduce((s,x)=>s+x.r,0));
  const pf=grossLoss?grossWin/grossLoss:(grossWin?99:0),acc=(wins.length+losses.length)?wins.length/(wins.length+losses.length):0,avgR=resolved.length?resolved.reduce((s,x)=>s+x.r,0)/resolved.length:0;
- const bars=triggered.filter(x=>Number.isFinite(x.barsToTrigger)).map(x=>x.barsToTrigger),tp2=triggered.filter(x=>x.tp2).length,reasonCounts={};
+ const bars=triggered.filter(x=>Number.isFinite(x.barsToTrigger)).map(x=>x.barsToTrigger),tp2=triggered.filter(x=>x.tp2Potential).length,reasonCounts={};
  rows.filter(x=>!x.triggered).forEach(x=>reasonCounts[x.noTriggerReason]=(reasonCounts[x.noTriggerReason]||0)+1);
  return{signals:rows.length,triggered:triggered.length,triggerRate:rows.length?triggered.length/rows.length:0,resolved:resolved.length,wins:wins.length,losses:losses.length,accuracy:acc,pf,avgR,wilson:wilsonLower95(wins.length,wins.length+losses.length),maxDD:maxDrawdownR(rows),ambiguous:ambiguous.length,noTrigger:rows.length-triggered.length,tp2Rate:triggered.length?tp2/triggered.length:0,avgBarsToTrigger:bars.length?mean(bars):0,reasonCounts};
 }
@@ -748,29 +852,84 @@ function pairedResearchStats(records){
  }
  return{fakeAvoided,missedWinners,retestImproved,retestWorsened,bothResolved};
 }
-function buildHistoricalResearch(cs,tf,costBps){
- const spec=validationSpec(tf),first=Math.max(330,Math.floor(cs.length*.40)),span=cs.length-first,foldSize=Math.floor(span/4),lookahead=expiryBars(tf)+researchHoldBars(tf)+3,records=[];
+
+function lastIndexClosedAtOrBefore(cs,closeTime){
+ let lo=0,hi=cs.length-1,ans=-1;
+ while(lo<=hi){
+   const m=(lo+hi)>>1;
+   if((cs[m].closeTime||0)<=closeTime){ans=m;lo=m+1;}else hi=m-1;
+ }
+ return ans;
+}
+function historicalCoreAt(cs,idx){
+ if(idx<259)return null;
+ return technicalCore(cs.slice(Math.max(0,idx-319),idx+1));
+}
+function historicalMtfSnapshot(sets,tf,i){
+ const selected=sets[tf],bar=selected[i];
+ if(!bar)return null;
+ const t=bar.closeTime||bar.time;
+ const idx={};
+ for(const k of['M15','H1','D1']){
+   idx[k]=k===tf?i:lastIndexClosedAtOrBefore(sets[k],t);
+   if(idx[k]<259)return null;
+ }
+ const cores={
+   M15:historicalCoreAt(sets.M15,idx.M15),
+   H1:historicalCoreAt(sets.H1,idx.H1),
+   D1:historicalCoreAt(sets.D1,idx.D1)
+ };
+ if(!cores.M15||!cores.H1||!cores.D1)return null;
+ const core=cores[tf],mtf=mtfComponent(tf,cores),score=clamp(core.baseScore+mtf*.10),side=score>=65?1:score<=35?-1:0;
+ return{a:{...core,score,side,mtf,session:tf==='D1'?'N/A — Daily timeframe':core.session},cores,idx};
+}
+function fullMtfStartIndex(sets,tf){
+ const cs=sets[tf];
+ for(let i=330;i<cs.length;i++){
+   if(historicalMtfSnapshot(sets,tf,i))return i;
+ }
+ return -1;
+}
+
+function buildHistoricalResearch(sets,tf,costBps){
+ const cs=sets[tf],spec=validationSpec(tf),lookahead=expiryBars(tf)+researchHoldBars(tf)+3,fullStart=fullMtfStartIndex(sets,tf);
+ if(fullStart<0)throw new Error('لا توجد تغطية MTF تاريخية كافية لهذا الفريم.');
+ const researchStart=Math.max(fullStart,Math.floor(fullStart+(cs.length-fullStart)*.40));
+ const usableEnd=cs.length-lookahead-1;
+ const span=Math.max(1,usableEnd-researchStart),foldSize=Math.max(1,Math.floor(span/4)),records=[];
  for(let f=0;f<4;f++){
-   const rawStart=first+f*foldSize,rawEnd=f===3?cs.length-1:first+(f+1)*foldSize-1,start=Math.max(330,rawStart+spec.purge),end=Math.min(cs.length-lookahead-1,rawEnd-lookahead);
+   const rawStart=researchStart+f*foldSize,rawEnd=f===3?usableEnd:researchStart+(f+1)*foldSize-1;
+   const start=Math.max(researchStart,rawStart+spec.purge),end=Math.min(usableEnd,rawEnd-spec.purge);
    if(end<=start)continue;
    for(let i=start;i<=end;i+=spec.step){
-     const window=cs.slice(Math.max(0,i-319),i+1),a0=technicalCore(window),score=clamp(a0.baseScore/a0.baseWeight),side=score>=65?1:score<=35?-1:0;
-     if(!side||!Number.isFinite(a0.atr)||a0.atr<=0)continue;
-     const a={...a0,score,side},plan=paperLevels(a),sig={i,fold:f,a,side,plan},A=simulateResearchMethod(cs,sig,'A',tf,costBps),B=simulateResearchMethod(cs,sig,'B',tf,costBps),C=simulateResearchMethod(cs,sig,'C',tf,costBps);
-     for(const x of[A,B,C]){x.signalIndex=i;x.fold=f;x.side=side;x.signalScore=score;}
-     records.push({i,fold,side,score,plan,A,B,C});
+     const snap=historicalMtfSnapshot(sets,tf,i);
+     if(!snap)continue;
+     const a=snap.a,side=a.side;
+     if(!side||!Number.isFinite(a.atr)||a.atr<=0)continue;
+     const plan=paperLevels(a),sig={i,fold:f,a,side,plan};
+     const A=simulateResearchMethod(cs,sig,'A',tf,costBps),B=simulateResearchMethod(cs,sig,'B',tf,costBps),C=simulateResearchMethod(cs,sig,'C',tf,costBps);
+     for(const x of[A,B,C]){x.signalIndex=i;x.fold=f;x.side=side;x.signalScore=a.score;}
+     records.push({i,fold:f,side,score:a.score,plan,A,B,C});
    }
  }
  const rowsA=records.map(r=>r.A),rowsB=records.map(r=>r.B),rowsC=records.map(r=>r.C);
- return{records,A:{stats:aggregateResearch(rowsA),folds:researchFoldStats(rowsA)},B:{stats:aggregateResearch(rowsB),folds:researchFoldStats(rowsB)},C:{stats:aggregateResearch(rowsC),folds:researchFoldStats(rowsC)},paired:pairedResearchStats(records),adaptiveRetestCount:records.filter(r=>String(r.plan.triggerMode).includes('RETEST')).length,adaptiveCloseCount:records.filter(r=>!String(r.plan.triggerMode).includes('RETEST')).length};
+ return{
+   records,fullStart,researchStart,usableEnd,
+   A:{stats:aggregateResearch(rowsA),folds:researchFoldStats(rowsA)},
+   B:{stats:aggregateResearch(rowsB),folds:researchFoldStats(rowsB)},
+   C:{stats:aggregateResearch(rowsC),folds:researchFoldStats(rowsC)},
+   paired:pairedResearchStats(records),
+   adaptiveRetestCount:records.filter(r=>String(r.plan.triggerMode).includes('RETEST')).length,
+   adaptiveCloseCount:records.filter(r=>!String(r.plan.triggerMode).includes('RETEST')).length
+ };
 }
 function researchMetric(label,value,cls=''){return`<div class="methodMetric"><small>${label}</small><b class="${cls}">${value}</b></div>`;}
 function metricClassPositive(x,neutral=0){return x>neutral?'researchGood':x<neutral?'researchBad':'researchNeutral';}
 function renderResearchResult(symbol,tf,costBps,result,historyN){
  for(const id of['researchSummary','researchCompare','researchPairs','researchFolds','researchLifecycle'])$(id).classList.remove('hidden');
- $('researchSummary').innerHTML=`<h2>Historical Entry Research — ${esc(symbol)} ${tf}</h2><div class="metrics">${metric('Closed candles used',historyN)}${metric('Historical signals',result.records.length)}${metric('Research cost',costBps+' bps')}${metric('Execution model','Next candle open')}${metric('Adaptive chose Retest',result.adaptiveRetestCount)}${metric('Adaptive chose Close',result.adaptiveCloseCount)}</div><div class="researchWarning">هذا الاختبار يقارن طرق دخول على نفس الإشارات التاريخية. لا يوجد “فائز” تلقائي ولا تُعامل أي نتيجة كاحتمال للصفقة التالية. الهدف هو كشف trade-offs مثل Fake breakouts مقابل Missed moves.</div>`;
+ $('researchSummary').innerHTML=`<h2>Historical Entry Research — ${esc(symbol)} ${tf}</h2><span class="parityBadge">Historical MTF parity: ON</span><div class="metrics">${metric('Closed candles used',historyN)}${metric('Historical signals',result.records.length)}${metric('Research cost',costBps+' bps')}${metric('Execution model','Next candle open')}${metric('Exit benchmark','Full exit at TP1 (1.20R)')}${metric('Adaptive chose Retest',result.adaptiveRetestCount)}${metric('Adaptive chose Close',result.adaptiveCloseCount)}</div><div class="researchWarning">هذا الاختبار يقارن طرق دخول على نفس إشارات MTF التاريخية. Benchmark الخروج موحّد: خروج كامل عند TP1 = 1.20R؛ الوصول اللاحق إلى TP2 يُسجّل كتشخيص فقط ولا يرفع PF. لا يوجد “فائز” تلقائي.</div>`;
  const methods=['A','B','C'];
- $('researchCompare').innerHTML=`<h2>A/B/C Comparison</h2><div class="researchMethodGrid">${methods.map(m=>{const s=result[m].stats;return`<div class="methodCard"><span class="methodTag">${researchMethodName(m)}</span><div class="methodMetrics">${researchMetric('Signals',s.signals)}${researchMetric('Triggered',s.triggered)}${researchMetric('Trigger rate',pct(s.triggerRate))}${researchMetric('Resolved',s.resolved)}${researchMetric('Win rate',pct(s.accuracy),metricClassPositive(s.accuracy,.50))}${researchMetric('PF after costs',s.pf.toFixed(2),metricClassPositive(s.pf,1))}${researchMetric('Average net R',s.avgR.toFixed(3)+'R',metricClassPositive(s.avgR,0))}${researchMetric('Wilson 95%',pct(s.wilson),metricClassPositive(s.wilson,.50))}${researchMetric('Max drawdown',s.maxDD.toFixed(2)+'R')}${researchMetric('Avg bars to trigger',s.avgBarsToTrigger.toFixed(1))}${researchMetric('TP2 reached',pct(s.tp2Rate))}${researchMetric('Ambiguous OHLC',s.ambiguous)}</div></div>`;}).join('')}</div>
+ $('researchCompare').innerHTML=`<h2>A/B/C Comparison</h2><div class="researchMethodGrid">${methods.map(m=>{const s=result[m].stats;return`<div class="methodCard"><span class="methodTag">${researchMethodName(m)}</span><div class="methodMetrics">${researchMetric('Signals',s.signals)}${researchMetric('Triggered',s.triggered)}${researchMetric('Trigger rate',pct(s.triggerRate))}${researchMetric('Resolved',s.resolved)}${researchMetric('Win rate',pct(s.accuracy),metricClassPositive(s.accuracy,.50))}${researchMetric('PF after costs',s.pf.toFixed(2),metricClassPositive(s.pf,1))}${researchMetric('Average net R',s.avgR.toFixed(3)+'R',metricClassPositive(s.avgR,0))}${researchMetric('Wilson 95%',pct(s.wilson),metricClassPositive(s.wilson,.50))}${researchMetric('Max drawdown',s.maxDD.toFixed(2)+'R')}${researchMetric('Avg bars to trigger',s.avgBarsToTrigger.toFixed(1))}${researchMetric('TP2 potential after TP1',pct(s.tp2Rate))}${researchMetric('Ambiguous OHLC',s.ambiguous)}</div></div>`;}).join('')}</div>
  <div class="compareTableWrap"><table class="compareTable"><thead><tr><th>Metric</th><th>A: Breakout Close</th><th>B: Breakout + Retest</th><th>C: Adaptive</th></tr></thead><tbody>
  ${[['PF after costs',result.A.stats.pf.toFixed(2),result.B.stats.pf.toFixed(2),result.C.stats.pf.toFixed(2)],['Average net R',result.A.stats.avgR.toFixed(3)+'R',result.B.stats.avgR.toFixed(3)+'R',result.C.stats.avgR.toFixed(3)+'R'],['Win rate',pct(result.A.stats.accuracy),pct(result.B.stats.accuracy),pct(result.C.stats.accuracy)],['Wilson 95%',pct(result.A.stats.wilson),pct(result.B.stats.wilson),pct(result.C.stats.wilson)],['Max drawdown',result.A.stats.maxDD.toFixed(2)+'R',result.B.stats.maxDD.toFixed(2)+'R',result.C.stats.maxDD.toFixed(2)+'R'],['Trigger rate',pct(result.A.stats.triggerRate),pct(result.B.stats.triggerRate),pct(result.C.stats.triggerRate)],['Avg bars to trigger',result.A.stats.avgBarsToTrigger.toFixed(1),result.B.stats.avgBarsToTrigger.toFixed(1),result.C.stats.avgBarsToTrigger.toFixed(1)]].map(r=>`<tr>${r.map((x,i)=>`<td>${i===0?esc(x):x}</td>`).join('')}</tr>`).join('')}
  </tbody></table></div>`;
@@ -781,16 +940,23 @@ function renderResearchResult(symbol,tf,costBps,result,historyN){
 }
 async function runHistoricalResearch(){
  const b=$('runResearchBtn');b.disabled=true;
- const symbol=$('researchSymbol').value.trim().toUpperCase(),market=$('researchMarket').value,tf=$('researchTf').value,costBps=+$('researchCostBps').value,interval=researchInterval(tf),history=validationSpec(tf).history;
- $('researchStatus').textContent=`جاري جلب ${history} شمعة مغلقة...`;
+ const symbol=$('researchSymbol').value.trim().toUpperCase(),market=$('researchMarket').value,tf=$('researchTf').value,costBps=+$('researchCostBps').value;
+ if(tf==='D1'){ $('researchStatus').textContent='D1 Research معطّل في V5.6.7.1 حتى يتوفر أرشيف M15 أعمق لتحقيق MTF parity حقيقي.';b.disabled=false;return; }
+ $('researchStatus').textContent='جاري جلب M15/H1/D1 لبناء نفس MTF logic تاريخيًا...';
  try{
-   const cs=await fetchHistory(symbol,interval,market,history);
-   if(cs.length<500)throw new Error('عدد الشموع المتاحة غير كافٍ للاختبار التاريخي.');
-   $('researchStatus').textContent='جاري محاكاة A/B/C عبر 4 فترات زمنية...';
+   const [m15,h1,d1]=await Promise.all([
+     fetchHistory(symbol,'15m',market,4000),
+     fetchHistory(symbol,'1h',market,4000),
+     fetchHistory(symbol,'1d',market,1000)
+   ]);
+   const sets={M15:m15,H1:h1,D1:d1};
+   if(sets[tf].length<500)throw new Error('عدد الشموع المتاحة غير كافٍ للاختبار التاريخي.');
+   $('researchStatus').textContent='جاري محاكاة A/B/C مع Historical MTF parity و4 Folds...';
    await new Promise(r=>setTimeout(r,40));
-   const result=buildHistoricalResearch(cs,tf,costBps);
-   renderResearchResult(symbol,tf,costBps,result,cs.length);
-   $('researchStatus').textContent=`اكتمل V5.6.7 Historical Simulator — ${result.records.length} إشارة تاريخية مشتركة.`;
+   const result=buildHistoricalResearch(sets,tf,costBps);
+   if(!result.records.length)throw new Error('لم يتم العثور على إشارات MTF كاملة ضمن التغطية التاريخية المشتركة.');
+   renderResearchResult(symbol,tf,costBps,result,sets[tf].length);
+   $('researchStatus').textContent=`اكتمل V5.6.7.1 — ${result.records.length} إشارة مشتركة مع Historical MTF parity.`;
  }catch(e){$('researchStatus').textContent='خطأ في Historical Simulator: '+e.message;}
  finally{b.disabled=false;}
 }
@@ -819,7 +985,7 @@ $('runLiveBtn').onclick=async()=>{
    }
    const allSides=frames.map(x=>x.a.side||0),directionalCount=allSides.filter(x=>x!==0).length;
    const agreement=frames.length?Math.abs(allSides.reduce((q,x)=>q+x,0))/frames.length:0,strength=mtfStrength(frames);
-   currentLive={symbol,market,ctx,frames,agreement,directionalCount,strength,cfg};renderLive();$('status').textContent='اكتمل V5.6.7: Live Lifecycle + next-candle-open paper execution.';
+   currentLive={symbol,market,ctx,frames,agreement,directionalCount,strength,cfg};renderLive();$('status').textContent='اكتمل V5.6.7.1: Live Lifecycle + Technical Pause + Level Revalidation.';
  }catch(e){$('status').textContent='خطأ: '+e.message;}finally{b.disabled=false;}
 };
 
@@ -857,7 +1023,9 @@ function renderTf(){
  $('tfSummary').innerHTML=`<h2>${currentLive.symbol} — ${f.tf}</h2>
    <div class="score ${a.side===1?'bullish':a.side===-1?'bearish':'neutral'}">${a.score.toFixed(1)}/100</div>
    <div class="metrics">
-     ${metric('Technical direction',a.side===1?'Bullish':a.side===-1?'Bearish':'Neutral')}
+     ${metric('Primary Trend',primaryTrendLabel(a))}
+     ${metric('Current Setup',currentSetupLabel(a))}
+     ${metric('Market Structure',a.structureState)}
      ${metric('Closed price',fmt(a.price,6))}
      ${metric('Session',a.session)}
      ${metric('Regime',a.regime)}

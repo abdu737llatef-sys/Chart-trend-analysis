@@ -1,37 +1,44 @@
-# Chart Trend Analyzer V5.6.7
-## Historical Lifecycle Simulator + A/B Entry Validator
+# V5.6.7.1 — Research & Lifecycle Integrity Fix
 
-يحافظ V5.6.7 على دورة السيناريو الحية من V5.6.6.1 ويستخدم نفس مفتاح localStorage:
-`cta_v566_paper_scenarios`
+## تم إصلاح خطأ Research
+الخطأ:
+`fold is not defined`
 
-وبذلك يستمر سيناريو Paper القديم عند التحديث ما دام المستخدم لم يحذف بيانات الموقع.
+كان سببه حفظ `fold` بدل `fold:f` داخل Historical Simulator.
 
-## طرق الدخول
-A — Breakout Close:
-إغلاق بعد مستوى الاختراق/الكسر ثم Paper execution عند Open الشمعة التالية.
+## Historical MTF parity
+Research على M15/H1 يبني الإشارة التاريخية باستخدام M15/H1/D1 المغلقة عند نفس النقطة الزمنية، بنفس وزن MTF المستخدم في Live.
 
-B — Breakout + Retest:
-إغلاق الاختراق ثم Retest ناجح وإغلاق تأكيدي ثم Paper execution عند Open الشمعة التالية.
+D1 Research معطّل مؤقتًا لأن MTF parity الحقيقي لـ D1 يحتاج أرشيف M15 أعمق بكثير من ميزانية المتصفح الحالية.
 
-C — Adaptive:
-يستخدم منطق V5.6.6.1:
-- مستوى قوي أو Momentum/Volume غير كافيين -> Retest.
-- Momentum + Trend Strength + Volume قوية -> Continuation بدون Retest.
+## Exit benchmark الموحد
+A/B/C تقارن طرق الدخول فقط:
+- التنفيذ = Open الشمعة التالية بعد التأكيد.
+- الخروج الإحصائي الكامل = TP1 عند +1.20R.
+- TP2 لا يرفع PF أو Average R؛ يتم تسجيله كـ "TP2 potential after TP1" فقط.
+- Stop/TP1 في نفس شمعة OHLC = AMBIGUOUS.
 
-## المقاييس
-Trigger rate, Resolved N, Win rate, PF after costs, Average net R, Wilson 95%, Max Drawdown R, Average bars to trigger, TP2 reach rate, Ambiguous OHLC.
+## Live Scenario
+تمت إضافة:
+- PAUSED_TECHNICAL إذا أصبح Current Setup محايدًا قبل التفعيل.
+- السيناريو لا يُحذف، ويمكن استئنافه إذا عاد نفس الاتجاه قبل Expiry.
+- الاتجاه المعاكس أو Higher-TF veto = INVALIDATED.
+- Level Drift بين breakout الأصلي وS/R الحالي بوحدة ATR.
+- REVALIDATION REQUIRED إذا أصبح drift >= 1 ATR.
+- STALE_REVALIDATION يمنع تفعيل دخول جديد حتى يعود drift أقل من 0.75 ATR.
+- Bars elapsed يُحفظ في كل تحليل حتى لو لم تتغير State.
 
-## Paired trade-off
-يحسب على نفس الإشارات:
-- خسائر A التي تم تجنبها لأن B لم يسمح بالدخول.
-- حركات A الرابحة التي ضاعت لأن B لم يحصل على Retest.
-- حالات دخلت فيها الطريقتان وتحولت النتيجة من خسارة إلى ربح أو العكس.
+## فصل الاتجاه عن Setup
+يظهر الآن:
+- Primary Trend
+- Current Setup
+- Market Structure
 
-## Folds
-آخر ~60% من التاريخ مقسّم إلى 4 Chronological Folds مع Purge وlook-ahead buffer.
+مثال:
+Primary Trend = Bullish
+Current Setup = Neutral / Compression
 
-## Execution integrity
-لا يستخدم Close شمعة التأكيد كسعر تعبئة.
-التنفيذ البحثي = Open الشمعة التالية.
+وهذا يفسر لماذا قد يصبح H1 Neutral دون كسر الدعم.
 
-كل النتائج Paper Research فقط وليست توقعات أو تعليمات تداول حقيقية.
+## Paper Research only
+كل المستويات والاختبارات بحثية ومحاكاة فقط.

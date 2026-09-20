@@ -185,3 +185,14 @@ table{width:100%;border-collapse:collapse;min-width:760px}th,td{padding:9px 8px;
 .foldMethod{margin-top:10px}.foldMethod h3{font-size:15px;margin:0 0 7px}.researchWarning{padding:10px;background:#2c2717;border:1px solid #675828;border-radius:12px;color:#f1d990;line-height:1.7}
 .researchGood{color:#68e6be}.researchBad{color:#ff98ad}.researchNeutral{color:#d2dced}
 @media(max-width:900px){.researchMethodGrid{grid-template-columns:1fr}.pairedGrid{grid-template-columns:repeat(2,1fr)}}
+
+/* V5.6.7.1 — Research + lifecycle integrity fixes */
+.stateTechPause{background:#332b18;border:1px solid #846b2e;color:#ffdc86}
+.stateStale{background:#3a241b;border:1px solid #8b5433;color:#ffbd91}
+.revalidationWarn{margin-top:10px;padding:10px;border-radius:12px;background:#302319;border:1px solid #7c5432;color:#ffd0a8;line-height:1.7}
+.snapshotGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:9px}
+.snapshotCell{background:#0b182b;border:1px solid #2a4164;border-radius:11px;padding:9px}
+.snapshotCell small{display:block;color:#91a5c8;font-size:10px}.snapshotCell b{font-size:15px}
+.setupNote{margin-top:8px;padding:8px 10px;border-radius:10px;background:#101d31;border:1px solid #2d466b;color:#c5d4ef;line-height:1.65}
+.parityBadge{display:inline-block;padding:5px 9px;border-radius:999px;background:#12362f;border:1px solid #31745f;color:#78e7c0;font-size:10px;font-weight:800;margin:4px 0 8px}
+@media(max-width:800px){.snapshotGrid{grid-template-columns:1fr}}
