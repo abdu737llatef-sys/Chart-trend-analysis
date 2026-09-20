@@ -1,4 +1,4 @@
-# V5.6.7.2 — Validation Consistency Fix
+# V5.6.7.2.1 — Validation Consistency Fix
 
 ## 1) Higher-TF veto
 تم تحويل Live engine إلى ثلاث مراحل:
@@ -47,3 +47,10 @@ Majority Direction = Bearish 2/3
 
 ## Paper Research only
 كل النتائج والمستويات لأغراض المحاكاة والتحقق التاريخي فقط.
+
+
+## V5.6.7.2.1 Hotfix
+- Restore `metric()` used by Live and Research rendering.
+- Restore `statusClass()` used by Final Decision cards.
+- Add a small UI helper self-check before Live rendering.
+- No strategy thresholds, OOS rules, Adaptive profiles, entry logic, TP/SL logic, or Higher-TF veto rules were changed.

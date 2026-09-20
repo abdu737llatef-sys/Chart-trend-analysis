@@ -2,7 +2,7 @@ const $=id=>document.getElementById(id);
 let deferredPrompt=null,currentLive=null,currentTf='H1';
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
- const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.2',{updateViaCache:'none'});await reg.update();
+ const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.2.1',{updateViaCache:'none'});await reg.update();
 }catch(e){console.warn(e);}});
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('installBtn').classList.remove('hidden');});
 $('installBtn').onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('installBtn').classList.add('hidden');};
@@ -1096,7 +1096,7 @@ function renderResearchResult(symbol,tf,costBps,result,historyN){
 async function runHistoricalResearch(){
  const b=$('runResearchBtn');b.disabled=true;
  const symbol=$('researchSymbol').value.trim().toUpperCase(),market=$('researchMarket').value,tf=$('researchTf').value,costBps=+$('researchCostBps').value;
- if(tf==='D1'){ $('researchStatus').textContent='D1 Research معطّل في V5.6.7.2 حتى يتوفر مسار بيانات أعمق مناسب للمتصفح.';b.disabled=false;return; }
+ if(tf==='D1'){ $('researchStatus').textContent='D1 Research معطّل في V5.6.7.2.1 حتى يتوفر مسار بيانات أعمق مناسب للمتصفح.';b.disabled=false;return; }
  $('researchStatus').textContent='جاري جلب تاريخ MTF متداخل فعليًا...';
  try{
    const needs=tf==='H1'
@@ -1114,7 +1114,7 @@ async function runHistoricalResearch(){
    const result=buildHistoricalResearch(sets,tf,costBps);
    if(!result.records.length)throw new Error('لم يتم العثور على إشارات كاملة بعد تطبيق MTF + Higher‑TF veto.');
    renderResearchResult(symbol,tf,costBps,result,sets[tf].length);
-   $('researchStatus').textContent=`اكتمل V5.6.7.2 — ${result.records.length} إشارة بعد MTF parity + veto.`;
+   $('researchStatus').textContent=`اكتمل V5.6.7.2.1 — ${result.records.length} إشارة بعد MTF parity + veto.`;
  }catch(e){$('researchStatus').textContent='خطأ في Historical Simulator: '+e.message;}
  finally{b.disabled=false;}
 }
@@ -1161,11 +1161,16 @@ $('runLiveBtn').onclick=async()=>{
    const majorityCount=Math.max(bull,bear),majorityDirection=bull>bear?'Bullish':bear>bull?'Bearish':'Split / Neutral';
    const strength=mtfStrength(frames);
    currentLive={symbol,market,ctx,frames,agreement:netConsensus,netConsensus,directionalCount,bullCount:bull,bearCount:bear,neutralCount:neutral,majorityCount,majorityDirection,strength,cfg};
+   // UI helper self-check: fail with a precise message instead of a blank dashboard.
+   if(typeof metric!=='function'||typeof statusClass!=='function')throw new Error('UI helper initialization failed');
    currentTf='H1';renderLive();
-   $('status').textContent='اكتمل V5.6.7.2: two-pass MTF + correct Higher‑TF veto + MTF-aware OOS.';
+   $('status').textContent='اكتمل V5.6.7.2.1: two-pass MTF + correct Higher‑TF veto + MTF-aware OOS.';
  }catch(e){$('status').textContent='خطأ: '+e.message;}
  finally{b.disabled=false;}
 };
+
+function metric(label,value,cls=''){return`<div class="metric"><small>${label}</small><b class="${cls}">${value}</b></div>`;}
+function statusClass(s){return s==='BLOCKED'?'statusBlocked':s==='PRELIMINARY'?'statusPrelim':s==='CONFIRMED'?'statusConfirmed':'statusHigh';}
 
 function renderLive(){
  const x=currentLive;
