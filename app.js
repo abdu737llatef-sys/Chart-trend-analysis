@@ -2,7 +2,7 @@ const $=id=>document.getElementById(id);
 let deferredPrompt=null,currentLive=null,currentTf='H1';
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
- const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.2.1',{updateViaCache:'none'});await reg.update();
+ const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.2.2',{updateViaCache:'none'});await reg.update();
 }catch(e){console.warn(e);}});
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('installBtn').classList.remove('hidden');});
 $('installBtn').onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('installBtn').classList.add('hidden');};
@@ -23,6 +23,11 @@ const clamp=(x,a=0,b=100)=>Math.max(a,Math.min(b,x));
 const fmt=(x,n=4)=>Number.isFinite(x)?Number(x).toFixed(n):'N/A';
 const esc=(s='')=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pct=x=>Number.isFinite(x)?`${(x*100).toFixed(1)}%`:'N/A';
+function displayPF(pf,n=999,minN=10){
+ if(n<minN)return'INSUFFICIENT SAMPLE';
+ if(pf===Infinity)return'∞';
+ return Number.isFinite(pf)?Number(pf).toFixed(2):'N/A';
+}
 
 const SCENARIO_KEY='cta_v566_paper_scenarios';
 function loadScenarios(){
@@ -1013,6 +1018,8 @@ function buildHistoricalResearch(sets,tf,costBps){
 function researchMetric(label,value,cls=''){return`<div class="methodMetric"><small>${label}</small><b class="${cls}">${value}</b></div>`;}
 function metricClassPositive(x,neutral=0){return x>neutral?'researchGood':x<neutral?'researchBad':'researchNeutral';}
 function renderResearchResult(symbol,tf,costBps,result,historyN){
+ if(typeof metric!=='function'||typeof displayPF!=='function'||typeof researchMetric!=='function')
+   throw new Error('Research UI helper initialization failed: metric/displayPF/researchMetric');
  for(const id of['researchSummary','researchCompare','researchPairs','researchAdaptive','researchFolds','researchLifecycle'])$(id).classList.remove('hidden');
  const overlapStart=result.effectiveOverlapStart?new Date(result.effectiveOverlapStart).toLocaleDateString('en-CA'):'N/A';
  const overlapEnd=result.effectiveOverlapEnd?new Date(result.effectiveOverlapEnd).toLocaleDateString('en-CA'):'N/A';
@@ -1096,7 +1103,7 @@ function renderResearchResult(symbol,tf,costBps,result,historyN){
 async function runHistoricalResearch(){
  const b=$('runResearchBtn');b.disabled=true;
  const symbol=$('researchSymbol').value.trim().toUpperCase(),market=$('researchMarket').value,tf=$('researchTf').value,costBps=+$('researchCostBps').value;
- if(tf==='D1'){ $('researchStatus').textContent='D1 Research معطّل في V5.6.7.2.1 حتى يتوفر مسار بيانات أعمق مناسب للمتصفح.';b.disabled=false;return; }
+ if(tf==='D1'){ $('researchStatus').textContent='D1 Research معطّل في V5.6.7.2.2 حتى يتوفر مسار بيانات أعمق مناسب للمتصفح.';b.disabled=false;return; }
  $('researchStatus').textContent='جاري جلب تاريخ MTF متداخل فعليًا...';
  try{
    const needs=tf==='H1'
@@ -1114,7 +1121,7 @@ async function runHistoricalResearch(){
    const result=buildHistoricalResearch(sets,tf,costBps);
    if(!result.records.length)throw new Error('لم يتم العثور على إشارات كاملة بعد تطبيق MTF + Higher‑TF veto.');
    renderResearchResult(symbol,tf,costBps,result,sets[tf].length);
-   $('researchStatus').textContent=`اكتمل V5.6.7.2.1 — ${result.records.length} إشارة بعد MTF parity + veto.`;
+   $('researchStatus').textContent=`اكتمل V5.6.7.2.2 — ${result.records.length} إشارة بعد MTF parity + veto.`;
  }catch(e){$('researchStatus').textContent='خطأ في Historical Simulator: '+e.message;}
  finally{b.disabled=false;}
 }
@@ -1162,9 +1169,9 @@ $('runLiveBtn').onclick=async()=>{
    const strength=mtfStrength(frames);
    currentLive={symbol,market,ctx,frames,agreement:netConsensus,netConsensus,directionalCount,bullCount:bull,bearCount:bear,neutralCount:neutral,majorityCount,majorityDirection,strength,cfg};
    // UI helper self-check: fail with a precise message instead of a blank dashboard.
-   if(typeof metric!=='function'||typeof statusClass!=='function')throw new Error('UI helper initialization failed');
+   if(typeof metric!=='function'||typeof statusClass!=='function'||typeof displayPF!=='function')throw new Error('UI helper initialization failed: metric/statusClass/displayPF');
    currentTf='H1';renderLive();
-   $('status').textContent='اكتمل V5.6.7.2.1: two-pass MTF + correct Higher‑TF veto + MTF-aware OOS.';
+   $('status').textContent='اكتمل V5.6.7.2.2: two-pass MTF + correct Higher‑TF veto + MTF-aware OOS.';
  }catch(e){$('status').textContent='خطأ: '+e.message;}
  finally{b.disabled=false;}
 };

@@ -1,4 +1,4 @@
-# V5.6.7.2.1 — Validation Consistency Fix
+# V5.6.7.2.2 — Validation Consistency Fix
 
 ## 1) Higher-TF veto
 تم تحويل Live engine إلى ثلاث مراحل:
@@ -49,8 +49,19 @@ Majority Direction = Bearish 2/3
 كل النتائج والمستويات لأغراض المحاكاة والتحقق التاريخي فقط.
 
 
-## V5.6.7.2.1 Hotfix
+## V5.6.7.2.2 Hotfix
 - Restore `metric()` used by Live and Research rendering.
 - Restore `statusClass()` used by Final Decision cards.
 - Add a small UI helper self-check before Live rendering.
 - No strategy thresholds, OOS rules, Adaptive profiles, entry logic, TP/SL logic, or Higher-TF veto rules were changed.
+
+
+## V5.6.7.2.2 Hotfix
+- Fixed `displayPF is not defined`.
+- `displayPF()` now handles:
+  - normal PF values,
+  - Infinity as `∞`,
+  - small samples as `INSUFFICIENT SAMPLE`.
+- Added Live UI helper self-check for `metric`, `statusClass`, and `displayPF`.
+- Added Research UI helper self-check for `metric`, `displayPF`, and `researchMetric`.
+- No trading/research thresholds or signal logic were changed.
