@@ -196,3 +196,13 @@ table{width:100%;border-collapse:collapse;min-width:760px}th,td{padding:9px 8px;
 .setupNote{margin-top:8px;padding:8px 10px;border-radius:10px;background:#101d31;border:1px solid #2d466b;color:#c5d4ef;line-height:1.65}
 .parityBadge{display:inline-block;padding:5px 9px;border-radius:999px;background:#12362f;border:1px solid #31745f;color:#78e7c0;font-size:10px;font-weight:800;margin:4px 0 8px}
 @media(max-width:800px){.snapshotGrid{grid-template-columns:1fr}}
+
+/* V5.6.7.2 — Validation Consistency Fix */
+.profileGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.profileCard{background:#0b192c;border:1px solid #2d456a;border-radius:14px;padding:11px}
+.profileCard h3{margin:0 0 5px;font-size:15px}.profileRule{font-size:10px;color:#9fb2d3;line-height:1.55}
+.profileMetrics{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:8px}
+.sampleWarn{display:inline-block;padding:4px 7px;border-radius:999px;background:#342a16;border:1px solid #75602c;color:#f4d887;font-size:10px}
+.consensusBox{font-weight:800}
+.overlapNote{margin-top:9px;padding:9px;border:1px solid #2c4568;background:#0c1a2e;border-radius:11px;line-height:1.65;color:#c7d5ed}
+@media(max-width:900px){.profileGrid{grid-template-columns:1fr}}
