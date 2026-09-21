@@ -6,17 +6,17 @@
   <meta name="theme-color" content="#06111f">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>Chart Trend Analyzer V5.6.7.2.2</title>
-  <link rel="manifest" href="manifest.webmanifest?v=5.6.7.2.2">
+  <title>Chart Trend Analyzer V5.6.7.3</title>
+  <link rel="manifest" href="manifest.webmanifest?v=5.6.7.3">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="style.css?v=5.6.7.2.2">
+  <link rel="stylesheet" href="style.css?v=5.6.7.3">
 </head>
 <body>
 <main class="wrap">
   <header class="topbar">
     <div>
-      <h1>Chart Trend Analyzer <span>V5.6.7.2.2</span></h1>
+      <h1>Chart Trend Analyzer <span>V5.6.7.3</span></h1>
       <p>Statistical Validation • Purged Walk‑Forward • Signal Lock • Paper Research</p>
     </div>
     <button id="installBtn" class="install hidden">تثبيت التطبيق</button>
@@ -24,10 +24,10 @@
 
   <section class="card scannerLaunch">
     <div>
-      <h2>Crypto Market Scanner V5.6.7.2.2</h2>
-      <p class="muted">Scanner منفصل لاختيار المرشحين الأقوى، بينما Live MTF يفصل بين التحليل الفني والتحقق التاريخي وسلامة السوق.</p>
+      <h2>Crypto Market Scanner V5.6.7.3</h2>
+      <p class="muted">Scanner للاكتشاف، لكن التحقق النهائي وLive MTF يستخدمان الآن نفس Unified Decision Engine ونفس بوابات OOS.</p>
     </div>
-    <a class="scannerLaunchBtn" href="scanner.html?v=5.6.7.2.2">فتح Market Scanner</a>
+    <a class="scannerLaunchBtn" href="scanner.html?v=5.6.7.3">فتح Market Scanner</a>
   </section>
 
   <section class="card">
@@ -98,7 +98,7 @@
     </div>
 
     <div id="researchControls" class="hidden">
-      <h2>V5.6.7.2.2 — A/B Entry & Historical Lifecycle Simulator</h2>
+      <h2>V5.6.7.3 — A/B Entry & Historical Lifecycle Simulator</h2>
       <p class="muted">يقارن نفس الإشارات التاريخية بين Breakout Close وBreakout + Retest وAdaptive Entry. التنفيذ البحثي يتم عند Open الشمعة التالية بعد التأكيد، وليس عند سعر Close المعروف بعد انتهاء الشمعة.</p>
       <div class="formgrid">
         <label>الرمز<input id="researchSymbol" value="ADAUSDT" placeholder="ADAUSDT"></label>
@@ -155,16 +155,16 @@
   </section>
 
   <section class="card architectureCard">
-    <h2>V5.6.7.2.2 Decision Architecture</h2>
+    <h2>V5.6.7.3 Decision Architecture</h2>
     <div class="architecture">
       <div class="archLayer">
         <span class="archNum">1</span>
-        <div><b>Technical Engine</b><small>Structure 25% • Trend 20% • Momentum 12% • ADX 10% • Volume 12% • S/R & Breakout 11% • MTF 10%</small></div>
+        <div><b>Technical Engine</b><small>Structure 25% • Trend 20% • Momentum 12% • ADX 10% • Volume 12% • S/R 11% • Hierarchical Context 10%</small></div>
       </div>
       <div class="archArrow">↓</div>
       <div class="archLayer">
         <span class="archNum">2</span>
-        <div><b>Historical Validation Engine</b><small>Purged Walk‑Forward • OOS Accuracy • Resolved N • Cost-adjusted PF • Wilson 95% • A/B Entry Simulator</small></div>
+        <div><b>Historical Validation Engine</b><small>Timeframe-specific Purged Walk‑Forward • H1 uses H1+D1 • M15 uses M15+H1+D1 • D1 primary • Cost-adjusted PF • Wilson 95%</small></div>
       </div>
       <div class="archArrow">↓</div>
       <div class="archLayer">
@@ -180,6 +180,7 @@
     <p class="muted">Technical Score ليس احتمال نجاح. عند BLOCKED القريب فقط يمكن عرض Paper Reference Entry/TP/Stop بوضوح على أنها غير مؤهلة وليست إشارة تنفيذ.</p>
   </section>
 </main>
-<script src="app.js?v=5.6.7.2.2"></script>
+<script src="decision-engine.js?v=5.6.7.3"></script>
+<script src="app.js?v=5.6.7.3"></script>
 </body>
 </html>

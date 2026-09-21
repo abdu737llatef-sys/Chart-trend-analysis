@@ -2,7 +2,7 @@ const $=id=>document.getElementById(id);
 let deferredPrompt=null,currentLive=null,currentTf='H1';
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
- const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.2.2',{updateViaCache:'none'});await reg.update();
+ const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.3',{updateViaCache:'none'});await reg.update();
 }catch(e){console.warn(e);}});
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('installBtn').classList.remove('hidden');});
 $('installBtn').onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('installBtn').classList.add('hidden');};
@@ -135,93 +135,11 @@ function ichimoku(cs){const mid=(i,p)=>{if(i<p-1)return null;let hi=-Infinity,lo
 function confirmedPivots(cs,l=3,r=3){const hs=[],ls=[];for(let i=l;i<cs.length-r;i++){let h=true,lo=true;for(let j=i-l;j<=i+r;j++){if(j===i)continue;if(cs[j].high>=cs[i].high)h=false;if(cs[j].low<=cs[i].low)lo=false;}if(h)hs.push({i,confirmed:i+r,price:cs[i].high});if(lo)ls.push({i,confirmed:i+r,price:cs[i].low});}return{hs,ls};}
 function lastNN(a){for(let i=a.length-1;i>=0;i--)if(a[i]!=null&&Number.isFinite(a[i]))return a[i];return null;}
 function wilsonLower95(wins,n){if(!n)return 0;const z=1.96,p=wins/n,z2=z*z,den=1+z2/n;return(p+z2/(2*n)-z*Math.sqrt((p*(1-p)+z2/(4*n))/n))/den;}
-function validationSpec(tf){
- if(tf==='M15')return{history:4000,minN:80,step:4,horizon:16,purge:16,folds:4};
- if(tf==='H1')return{history:4000,minN:50,step:3,horizon:12,purge:12,folds:4};
- return{history:2500,minN:30,step:1,horizon:8,purge:8,folds:4};
-}
+function validationSpec(tf){return UnifiedDecisionEngine.validationSpec(tf);}
 function requiredSample(tf,cfg){return cfg.sampleRule==='auto'?validationSpec(tf).minN:cfg.minSample;}
 
 
-function technicalCore(cs){
- const c=cs.map(x=>x.close),v=cs.map(x=>x.volume||0),e20=ema(c,20),e50=ema(c,50),e200=ema(c,200),R=rsi(c),A=adx(cs),M=macd(c),I=ichimoku(cs),AT=atr(cs),vma=sma(v,20),piv=confirmedPivots(cs),last=cs.at(-1),i=cs.length-1;
- const E20=lastNN(e20),E50=lastNN(e50),E200=lastNN(e200),rv=lastNN(R),adxv=lastNN(A.adx),p=lastNN(A.plus),m=lastNN(A.minus),atrv=lastNN(AT),ten=lastNN(I.tenkan),kij=lastNN(I.kijun),sa=lastNN(I.spanA),sb=lastNN(I.spanB),mac=lastNN(M.line),sig=lastNN(M.signal),hist=lastNN(M.hist),vr=vma[i]?last.volume/vma[i]:1;
-
- let emaTrend=50;
- if(last.close>E20&&E20>E50&&E50>E200)emaTrend=92;
- else if(last.close>E50&&E50>E200)emaTrend=74;
- else if(last.close<E20&&E20<E50&&E50<E200)emaTrend=8;
- else if(last.close<E50&&E50<E200)emaTrend=26;
-
- const top=Math.max(sa,sb),bot=Math.min(sa,sb);
- let ichi=50;
- if(last.close>top&&ten>kij)ichi=92;
- else if(last.close>top)ichi=72;
- else if(last.close<bot&&ten<kij)ichi=8;
- else if(last.close<bot)ichi=28;
- const trend=(emaTrend+ichi)/2;
-
- let rsiScore=rv>=60?86:rv>=55?74:rv>=50?61:rv>=45?39:rv>=40?26:14;
- const macdScore=mac>sig&&hist>0?84:mac>sig?68:mac<sig&&hist<0?16:32;
- const momentum=(rsiScore+macdScore)/2;
-
- let strength=50;
- if(adxv>=25&&p>m)strength=88;
- else if(adxv>=20&&p>m)strength=70;
- else if(adxv>=25&&m>p)strength=12;
- else if(adxv>=20&&m>p)strength=30;
-
- const ah=piv.hs.filter(x=>x.confirmed<=i),al=piv.ls.filter(x=>x.confirmed<=i);
- let structure=50,structureState='Unclear / transition';
- if(ah.length>=2&&al.length>=2){
-   const hh=ah.at(-1).price>ah.at(-2).price,hl=al.at(-1).price>al.at(-2).price,lh=ah.at(-1).price<ah.at(-2).price,ll=al.at(-1).price<al.at(-2).price;
-   if(hh&&hl){structure=92;structureState='HH / HL — bullish structure';}
-   else if(lh&&ll){structure=8;structureState='LH / LL — bearish structure';}
-   else if(hh&&ll){structure=62;structureState='HH / LL — expanding / mixed';}
-   else if(lh&&hl){structure=38;structureState='LH / HL — compression';}
- }
-
- let volumeFlow=50;
- if(vr>=1.5&&last.close>last.open)volumeFlow=88;
- else if(vr>=1.2&&last.close>last.open)volumeFlow=72;
- else if(vr>=1.5&&last.close<last.open)volumeFlow=12;
- else if(vr>=1.2&&last.close<last.open)volumeFlow=28;
-
- const resistance=ah.length?ah.at(-1).price:Math.max(...cs.slice(-30).map(x=>x.high));
- const support=al.length?al.at(-1).price:Math.min(...cs.slice(-30).map(x=>x.low));
- const prev=cs.at(-2);
- const range=Math.max(1e-12,resistance-support);
- let srBreakout=clamp(100*(last.close-support)/range);
- const brokeUp=last.close>resistance&&prev?.close<=resistance;
- const brokeDown=last.close<support&&prev?.close>=support;
- const retestUp=cs.slice(-4,-1).some(x=>x.low<=resistance&&x.close>=resistance);
- const retestDown=cs.slice(-4,-1).some(x=>x.high>=support&&x.close<=support);
- if(brokeUp)srBreakout=retestUp?94:86;
- if(brokeDown)srBreakout=retestDown?6:14;
-
- const components={structure,trend,momentum,strength,volumeFlow,srBreakout};
- const baseScore=
-   structure*.25+
-   trend*.20+
-   momentum*.12+
-   strength*.10+
-   volumeFlow*.12+
-   srBreakout*.11;
- const baseWeight=.90;
- const h=new Date(last.time).getUTCHours(),session=h<7?'Asia':h<13?'London':h<16?'London/NY Overlap':h<21?'New York':'Late',regime=adxv>=25?'Trending':adxv<18?'Ranging':'Mixed';
- const levelTol=Math.max((atrv||last.close*.01)*.22,last.close*.0008);
- const resistanceTouches=separatedTouches(cs,resistance,levelTol,'R'),supportTouches=separatedTouches(cs,support,levelTol,'S');
- const resistanceStrength=clamp(28+resistanceTouches*16+(structure>=80?10:0)+(adxv>=25?8:0));
- const supportStrength=clamp(28+supportTouches*16+(structure<=20?10:0)+(adxv>=25?8:0));
-
- return{
-   price:last.close,components,baseScore,baseWeight,
-   structure,structureState,trend,momentum,strength,volumeFlow,srBreakout,
-   rsi:rv,adx:adxv,atr:atrv,ema20:E20,ema50:E50,ema200:E200,macd:mac,macdSignal:sig,volumeRatio:vr,
-   support,resistance,resistanceTouches,supportTouches,resistanceStrength,supportStrength,session,regime,barTime:last.time,barCloseTime:last.closeTime
- };
-}
-
+function technicalCore(cs){return UnifiedDecisionEngine.technicalCore(cs);}
 
 function primaryTrendLabel(a){
  if(a.trend>=65&&a.price>a.ema200)return'Bullish';
@@ -244,28 +162,13 @@ function isPreTriggerScenarioState(s){
  return['PENDING_BREAKOUT','WAITING_RETEST','PAUSED_INTEGRITY','PAUSED_TECHNICAL','STALE_REVALIDATION'].includes(s);
 }
 
-function mtfComponent(tf,cores){
- if(tf==='M15')return cores.H1.baseScore*.65+cores.D1.baseScore*.35;
- if(tf==='H1')return cores.D1.baseScore*.80+cores.M15.baseScore*.20;
- return cores.H1.baseScore*.80+cores.M15.baseScore*.20;
-}
+function mtfComponent(tf,cores){return UnifiedDecisionEngine.contextScore(tf,cores);}
 function mtfStrength(frames){
  const m=Object.fromEntries(frames.map(x=>[x.tf,x.a.score]));
  return (m.M15??50)*.20+(m.H1??50)*.50+(m.D1??50)*.30;
 }
 
-function higherTfVeto(tf,side,cores){
- if(!side)return false;
- if(tf==='M15'){
-   if(side===1&&(cores.H1.score<=35||cores.D1.score<=25))return true;
-   if(side===-1&&(cores.H1.score>=65||cores.D1.score>=75))return true;
- }
- if(tf==='H1'){
-   if(side===1&&cores.D1.score<=35)return true;
-   if(side===-1&&cores.D1.score>=65)return true;
- }
- return false;
-}
+function higherTfVeto(tf,side,cores){return UnifiedDecisionEngine.higherTfVeto(tf,side,cores);}
 
 function barrierOutcomeDetailed(cs,i,dir,atrv,h=12,costBps=10){
  const entry=cs[i].close,F=dir===1?entry+atrv:entry-atrv,A=dir===1?entry-atrv:entry+atrv;
@@ -492,7 +395,7 @@ function paperLevelsPolicy(a,policy=ADAPTIVE_POLICIES.LIVE){
    resistanceTouches:a.resistanceTouches||0,supportTouches:a.supportTouches||0,
    policyName:policy.name};
 }
-function paperLevels(a){return paperLevelsPolicy(a,ADAPTIVE_POLICIES.LIVE);}
+function paperLevels(a){return UnifiedDecisionEngine.paperLevels(a);}
 
 function confidenceTier(hist,integrity,techScore){
  if(hist.n>=100&&hist.wilson>=.53&&hist.pf>=1.30&&integrity.score>=80&&(techScore>=80||techScore<=20))return'HIGH CONFIDENCE';
@@ -878,71 +781,11 @@ function historicalCoreAt(cs,idx){
  if(idx<259)return null;
  return technicalCore(cs.slice(Math.max(0,idx-319),idx+1));
 }
-function historicalMtfSnapshot(sets,tf,i){
- const selected=sets[tf],bar=selected[i];
- if(!bar)return null;
- const t=bar.closeTime||bar.time,idx={};
- for(const k of['M15','H1','D1']){
-   idx[k]=k===tf?i:lastIndexClosedAtOrBefore(sets[k],t);
-   if(idx[k]<259)return null;
- }
- const base={
-   M15:historicalCoreAt(sets.M15,idx.M15),
-   H1:historicalCoreAt(sets.H1,idx.H1),
-   D1:historicalCoreAt(sets.D1,idx.D1)
- };
- if(!base.M15||!base.H1||!base.D1)return null;
+function historicalMtfSnapshot(sets,tf,i){return UnifiedDecisionEngine.historicalSnapshot(sets,tf,i);}
 
- // Two-pass architecture: all final MTF scores are created before any higher-TF veto.
- const finals={};
- for(const k of['M15','H1','D1']){
-   const mtf=mtfComponent(k,base),score=clamp(base[k].baseScore+mtf*.10),side=score>=65?1:score<=35?-1:0;
-   finals[k]={...base[k],score,side,mtf,session:k==='D1'?'N/A — Daily timeframe':base[k].session};
- }
- const a=finals[tf],veto=higherTfVeto(tf,a.side,finals);
- return{a,cores:finals,idx,veto};
-}
+function purgedWalkForwardMtf(sets,tf,costBps=10){return UnifiedDecisionEngine.purgedWalkForward(sets,tf,costBps);}
 
-function purgedWalkForwardMtf(sets,tf,costBps=10){
- const cs=sets[tf],spec=validationSpec(tf),AT=atr(cs),rows=[],fullStart=fullMtfStartIndex(sets,tf);
- if(fullStart<0)return{long:{n:0,wins:0,losses:0,acc:0,pf:0,wilson:0,avgR:0},short:{n:0,wins:0,losses:0,acc:0,pf:0,wilson:0,avgR:0},folds:[],spec,testN:0,costBps,overlapN:0};
- for(let i=fullStart;i<cs.length-spec.horizon;i+=spec.step){
-   const snap=historicalMtfSnapshot(sets,tf,i);
-   if(!snap||snap.veto||!snap.a.side||!AT[i])continue;
-   const o=barrierOutcomeDetailed(cs,i,snap.a.side,AT[i],spec.horizon,costBps);
-   if(o.out==='amb'||o.out==='timeout')continue;
-   rows.push({i,dir:snap.a.side,out:o.out,r:o.r});
- }
- const first=Math.max(fullStart,Math.floor(fullStart+(cs.length-fullStart)*.40)),span=Math.max(1,cs.length-first),foldSize=Math.max(1,Math.floor(span/spec.folds)),testRows=[],foldStats=[];
- for(let f=0;f<spec.folds;f++){
-   const rawStart=first+f*foldSize,rawEnd=f===spec.folds-1?cs.length-1:first+(f+1)*foldSize-1;
-   const start=rawStart+spec.purge,end=rawEnd-spec.horizon;
-   const fold=rows.filter(x=>x.i>=start&&x.i<=end);
-   testRows.push(...fold);
-   const n=fold.length,w=fold.filter(x=>x.out==='win').length;
-   foldStats.push({n,acc:n?w/n:0});
- }
- function side(dir){
-   const r=testRows.filter(x=>x.dir===dir),wins=r.filter(x=>x.out==='win').length,losses=r.filter(x=>x.out==='loss').length,n=wins+losses;
-   const gains=r.filter(x=>x.r>0).reduce((s,x)=>s+x.r,0),lossAbs=-r.filter(x=>x.r<0).reduce((s,x)=>s+x.r,0);
-   const acc=n?wins/n:0,pf=lossAbs>0?gains/lossAbs:(gains>0?Infinity:0),wilson=wilsonLower95(wins,n),avgR=n?r.reduce((s,x)=>s+x.r,0)/n:0;
-   return{n,wins,losses,acc,pf,wilson,avgR};
- }
- return{
-   long:side(1),short:side(-1),folds:foldStats,spec,testN:testRows.length,costBps,
-   overlapN:cs.length-fullStart,
-   overlapStartTime:cs[fullStart]?.time||null,
-   overlapEndTime:cs.at(-1)?.closeTime||null
- };
-}
-
-function fullMtfStartIndex(sets,tf){
- const cs=sets[tf];
- for(let i=330;i<cs.length;i++){
-   if(historicalMtfSnapshot(sets,tf,i))return i;
- }
- return -1;
-}
+function fullMtfStartIndex(sets,tf){return UnifiedDecisionEngine.fullStartIndex(sets,tf);}
 
 
 function adaptiveReasonCounts(plans){
@@ -1023,17 +866,17 @@ function renderResearchResult(symbol,tf,costBps,result,historyN){
  for(const id of['researchSummary','researchCompare','researchPairs','researchAdaptive','researchFolds','researchLifecycle'])$(id).classList.remove('hidden');
  const overlapStart=result.effectiveOverlapStart?new Date(result.effectiveOverlapStart).toLocaleDateString('en-CA'):'N/A';
  const overlapEnd=result.effectiveOverlapEnd?new Date(result.effectiveOverlapEnd).toLocaleDateString('en-CA'):'N/A';
- $('researchSummary').innerHTML=`<h2>Historical Entry Research — ${esc(symbol)} ${tf}</h2><span class="parityBadge">Historical MTF parity: ON</span><div class="metrics">
+ $('researchSummary').innerHTML=`<h2>Historical Entry Research — ${esc(symbol)} ${tf}</h2><span class="parityBadge">Timeframe-specific validation: ON</span><div class="metrics">
  ${metric(tf+' candles loaded',historyN)}
- ${metric('Effective MTF overlap',result.effectiveOverlapN)}
+ ${metric('Effective validation overlap',result.effectiveOverlapN)}
  ${metric('Historical signals',result.records.length)}
  ${metric('Research cost',costBps+' bps')}
  ${metric('Execution model','Next candle open')}
  ${metric('Exit benchmark','Full exit at TP1 (1.20R)')}
  ${metric('Adaptive chose Retest',result.adaptiveRetestCount)}
  ${metric('Adaptive chose Close',result.adaptiveCloseCount)}
- </div><div class="overlapNote"><b>Effective MTF date range:</b> ${overlapStart} → ${overlapEnd}<br>الرقم أعلاه هو التداخل الحقيقي الذي تتوفر فيه M15/H1/D1 معًا، وليس مجرد عدد شموع H1 المحمّلة.</div>
- <div class="researchWarning">Benchmark الخروج موحّد: خروج كامل عند TP1 = 1.20R. TP2 تشخيص فقط ولا يرفع PF. Higher‑TF veto مطبق تاريخيًا أيضًا.</div>`;
+ </div><div class="overlapNote"><b>Effective MTF date range:</b> ${overlapStart} → ${overlapEnd}<br>الرقم أعلاه هو التداخل الفعلي المطلوب للفريم المختار وفق التسلسل الهرمي الجديد؛ H1 لا يحتاج M15 تاريخيًا.</div>
+ <div class="researchWarning">Benchmark الخروج موحّد: خروج كامل عند TP1 = 1.20R. TP2 تشخيص فقط ولا يرفع PF. Higher‑TF veto مطبق تاريخيًا أيضًا، مع فصل دور الاتجاه عن دور توقيت الدخول.</div>`;
 
  const methods=['A','B','C'];
  $('researchCompare').innerHTML=`<h2>A/B/C Comparison</h2><div class="researchMethodGrid">${methods.map(m=>{const s=result[m].stats;return`<div class="methodCard"><span class="methodTag">${researchMethodName(m)}</span><div class="methodMetrics">
@@ -1103,12 +946,12 @@ function renderResearchResult(symbol,tf,costBps,result,historyN){
 async function runHistoricalResearch(){
  const b=$('runResearchBtn');b.disabled=true;
  const symbol=$('researchSymbol').value.trim().toUpperCase(),market=$('researchMarket').value,tf=$('researchTf').value,costBps=+$('researchCostBps').value;
- if(tf==='D1'){ $('researchStatus').textContent='D1 Research معطّل في V5.6.7.2.2 حتى يتوفر مسار بيانات أعمق مناسب للمتصفح.';b.disabled=false;return; }
+ if(tf==='D1'){ $('researchStatus').textContent='D1 Research معطّل في V5.6.7.3 حتى يتوفر مسار بيانات أعمق مناسب للمتصفح.';b.disabled=false;return; }
  $('researchStatus').textContent='جاري جلب تاريخ MTF متداخل فعليًا...';
  try{
    const needs=tf==='H1'
-     ?{M15:16500,H1:4000,D1:1000}
-     :{M15:4000,H1:1600,D1:500};
+     ?{M15:420,H1:4000,D1:900}
+     :{M15:4000,H1:1400,D1:500};
    const [m15,h1,d1]=await Promise.all([
      fetchHistory(symbol,'15m',market,needs.M15),
      fetchHistory(symbol,'1h',market,needs.H1),
@@ -1121,14 +964,14 @@ async function runHistoricalResearch(){
    const result=buildHistoricalResearch(sets,tf,costBps);
    if(!result.records.length)throw new Error('لم يتم العثور على إشارات كاملة بعد تطبيق MTF + Higher‑TF veto.');
    renderResearchResult(symbol,tf,costBps,result,sets[tf].length);
-   $('researchStatus').textContent=`اكتمل V5.6.7.2.2 — ${result.records.length} إشارة بعد MTF parity + veto.`;
+   $('researchStatus').textContent=`اكتمل V5.6.7.3 — ${result.records.length} إشارة بعد MTF parity + veto.`;
  }catch(e){$('researchStatus').textContent='خطأ في Historical Simulator: '+e.message;}
  finally{b.disabled=false;}
 }
 
 
 $('runLiveBtn').onclick=async()=>{
- const b=$('runLiveBtn');b.disabled=true;$('status').textContent='جاري جلب البيانات ثم حساب MTF scores قبل Higher‑TF veto...';
+ const b=$('runLiveBtn');b.disabled=true;$('status').textContent='جاري جلب البيانات وتشغيل Unified Decision Engine...';
  try{
    const symbol=$('liveSymbol').value.trim().toUpperCase(),market=$('liveMarket').value;
    const cfg={sampleRule:$('liveSampleRule').value,minSample:+$('liveMinSample').value,minAcc:+$('liveMinAcc').value,minPF:+$('liveMinPF').value,minWilson:+$('liveMinWilson').value,costBps:+$('liveCostBps').value};
@@ -1138,23 +981,16 @@ $('runLiveBtn').onclick=async()=>{
    const executionBars=await Promise.all(defs.map(x=>fetchCurrentKline(symbol,x[1],market).catch(()=>null)));
    const ctx=await marketContext();
 
-   // PASS 1: base cores for every timeframe.
-   const base={};
-   defs.forEach((d,i)=>base[d[0]]=technicalCore(loaded[i]));
-
-   // PASS 2: finalized MTF scores for every timeframe.
-   const finals={};
-   for(const [tf] of defs){
-     const mtf=mtfComponent(tf,base),score=clamp(base[tf].baseScore+mtf*.10),side=score>=65?1:score<=35?-1:0;
-     finals[tf]={...base[tf],score,side,mtf,session:tf==='D1'?'N/A — Daily timeframe':base[tf].session};
-   }
+   // Unified Decision Engine: one source of truth for Live + Scanner.
+   const finals=UnifiedDecisionEngine.finalizeCurrent(setsByTf);
 
    // PASS 3: only now evaluate historical validation, integrity and higher-TF veto.
    const frames=[];
    for(let i=0;i<defs.length;i++){
      const tf=defs[i][0],a=finals[tf];
-     $('status').textContent=`${tf}: MTF-aware Purged Walk‑Forward + integrity...`;
+     $('status').textContent=`${tf}: Timeframe-specific Purged Walk‑Forward + integrity...`;
      const oos=purgedWalkForwardMtf(setsByTf,tf,cfg.costBps);
+     oos.folds=a.side===1?(oos.foldsLong||oos.folds):a.side===-1?(oos.foldsShort||oos.folds):oos.folds;
      const integrity=await liveIntegrity(symbol,market,a.price,loaded[i]);
      const veto=higherTfVeto(tf,a.side,finals);
      const frame={tf,a,oos,integrity,veto,levels:a.side?paperLevels(a):null,candles:loaded[i]};
@@ -1171,7 +1007,7 @@ $('runLiveBtn').onclick=async()=>{
    // UI helper self-check: fail with a precise message instead of a blank dashboard.
    if(typeof metric!=='function'||typeof statusClass!=='function'||typeof displayPF!=='function')throw new Error('UI helper initialization failed: metric/statusClass/displayPF');
    currentTf='H1';renderLive();
-   $('status').textContent='اكتمل V5.6.7.2.2: two-pass MTF + correct Higher‑TF veto + MTF-aware OOS.';
+   $('status').textContent='اكتمل V5.6.7.3: two-pass MTF + correct Higher‑TF veto + MTF-aware OOS.';
  }catch(e){$('status').textContent='خطأ: '+e.message;}
  finally{b.disabled=false;}
 };
@@ -1249,8 +1085,8 @@ function renderTf(){
      <div class="layerMetric"><small>Average net R</small><b>${h.avgR.toFixed(3)}R</b></div>
      <div class="layerMetric"><small>Research cost</small><b>${currentLive.cfg.costBps} bps</b></div>
    </div><div class="foldGrid">${folds.map((z,i)=>`<div class="foldBox"><small>Fold ${i+1}</small><b>${z.n?((z.acc*100).toFixed(1)+'%'):'N/A'}</b><small>N ${z.n}</small></div>`).join('')}</div>`:'<div class="hiddenLevels">لا يوجد اتجاه فني، لذلك لا يوجد Side-specific validation.</div>'}
-   <div class="overlapNote">MTF-aware OOS overlap: ${f.oos.overlapN||0} ${f.tf} candles${f.oos.overlapStartTime?` • ${new Date(f.oos.overlapStartTime).toLocaleDateString('en-CA')} → ${new Date(f.oos.overlapEndTime).toLocaleDateString('en-CA')}`:''}</div>
-   <p class="muted">تم حساب اتجاه كل إشارة تاريخية باستخدام M15/H1/D1 ثم تطبيق Higher‑TF veto قبل إدخالها في OOS. هذه إحصاءات تاريخية وليست احتمالًا مضمونًا.</p>`;
+   <div class="overlapNote">Timeframe-specific OOS overlap: ${f.oos.overlapN||0} ${f.tf} candles${f.oos.overlapStartTime?` • ${new Date(f.oos.overlapStartTime).toLocaleDateString('en-CA')} → ${new Date(f.oos.overlapEndTime).toLocaleDateString('en-CA')}`:''}</div>
+   <p class="muted">${esc(f.oos.validationMode||'Timeframe-specific validation')}<br>تم تطبيق Higher‑TF veto قبل إدخال الإشارة في OOS. هذه إحصاءات تاريخية وليست احتمالًا مضمونًا.</p>`;
 
  const flags=f.integrity.flags?.length?f.integrity.flags.map(x=>`<span class="integrityFlag">${esc(x)}</span>`).join(''):'<span class="integrityOk">No major live integrity flag</span>';
  $('tfIntegrity').innerHTML=`<h2>3 — Market Integrity Engine</h2>

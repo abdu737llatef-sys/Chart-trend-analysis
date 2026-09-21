@@ -1,67 +1,53 @@
-# V5.6.7.2.2 — Validation Consistency Fix
+# V5.6.7.3 — Unified + Timeframe-Specific Validation Engine
 
-## 1) Higher-TF veto
-تم تحويل Live engine إلى ثلاث مراحل:
-1. حساب Base Technical Core لكل M15/H1/D1.
-2. حساب Final MTF score لكل الفريمات.
-3. بعد اكتمال الدرجات الثلاث فقط يتم حساب Higher‑TF veto.
+## الهدف
+إنهاء المفارقة بين Market Scanner و Live MTF.
 
-هذا يمنع حالة H1 Bearish بينما D1 Bullish>=65 من إظهار veto=NO بسبب أن D1 لم يكن قد حُسب بعد.
+## Unified Decision Engine
+تم إنشاء ملف مشترك:
+`decision-engine.js`
 
-## 2) Live OOS أصبح MTF-aware
-Purged Walk-Forward الحي يستخدم الآن الإشارة التاريخية بعد MTF score ويطبق Higher-TF veto تاريخيًا، بدل single-timeframe base score فقط.
-يظهر أيضًا Effective MTF overlap المتاح فعليًا.
+وهو المصدر المشترك لـ:
+- Technical Core
+- Timeframe hierarchy
+- Higher-TF veto
+- Purged Walk-Forward
+- Cost-adjusted PF
+- Wilson 95%
+- Paper Entry / Stop / TP1 / TP2
 
-## 3) Research MTF overlap
-عند H1 Research يتم جلب تقريبًا:
-- 16,500 M15 candles
-- 4,000 H1 candles
-- 1,000 D1 candles
+Live وScanner يستدعيان نفس المحرك بدل امتلاك نسختين مستقلتين من القرار.
 
-وتعرض الواجهة Effective MTF overlap الحقيقي والتاريخ الفعلي، بدل الادعاء أن كل H1 loaded candles لها نفس تغطية M15/D1.
+## Timeframe-specific hierarchy
+### H1
+- H1 = signal frame
+- D1 = directional confirmation / veto
+- M15 = timing only
+- M15 historical coverage لا تقصّر تاريخ H1 بعد الآن
 
-## 4) PF والعينات الصغيرة
-لا يتم استخدام PF=99 كرقم بديل عند عدم وجود خسائر.
-إذا كان Fold N<10 تظهر:
-INSUFFICIENT SAMPLE
+### M15
+- M15 = timing / execution research
+- H1 = main confirmation
+- D1 = higher context / veto
 
-## 5) Adaptive diagnostics
-تم الإبقاء على Live rule دون تغيير.
-Research يقارن ثلاث سياسات ثابتة فقط:
-- Live Conservative: Strong>=65, Momentum>=70, Strength>=65, Volume>=60
-- Research Balanced: Strong>=75, Momentum>=62, Strength>=58, Volume>=50
-- Research Momentum: Strong>=85, Momentum>=55, Strength>=50, Volume>=45
+### D1
+- D1 = primary direction
+- Lower timeframes لا تعيد كتابة اتجاه D1
 
-لا يتم اختيار "فائز" تلقائيًا ولا يتم تعديل Live thresholds من نتيجة عملة واحدة.
+## Scanner
+Stage 1 ما زال سريعًا لاكتشاف المرشحين.
+أي finalist يعاد تحليله كاملًا بواسطة Unified Engine.
 
-## 6) Consensus wording
-Direction Agreement أصبح:
-Net Direction Consensus
+أضيف:
+- Spot / USD-M Futures selector
+- Research round-trip cost
+- Auto required sample:
+  M15=80 / H1=50 / D1=30
+- Scanner final OOS هو نفس Purged Walk-Forward المستخدم في Live
+- PF هو cost-adjusted R-based PF وليس wins/losses
+- Paper levels من نفس الدالة المستخدمة في Live
 
-كما تمت إضافة:
-Majority Direction = Bullish/Bearish X/3
+Scanner Integrity يبقى طبقة إضافية أكثر صرامة؛ لذلك قد يرفض Scanner شيئًا يمر في Live بسبب السيولة/العمق، لكن لا ينبغي أن يؤهل Scanner مرشحًا يفشل في نفس Historical Validation على Live لنفس السوق ونفس الشمعة.
 
-حتى تكون حالة مثل M15 Bearish + H1 Bearish + D1 Bullish واضحة:
-Net Consensus = 33.3%
-Majority Direction = Bearish 2/3
-
-## Paper Research only
-كل النتائج والمستويات لأغراض المحاكاة والتحقق التاريخي فقط.
-
-
-## V5.6.7.2.2 Hotfix
-- Restore `metric()` used by Live and Research rendering.
-- Restore `statusClass()` used by Final Decision cards.
-- Add a small UI helper self-check before Live rendering.
-- No strategy thresholds, OOS rules, Adaptive profiles, entry logic, TP/SL logic, or Higher-TF veto rules were changed.
-
-
-## V5.6.7.2.2 Hotfix
-- Fixed `displayPF is not defined`.
-- `displayPF()` now handles:
-  - normal PF values,
-  - Infinity as `∞`,
-  - small samples as `INSUFFICIENT SAMPLE`.
-- Added Live UI helper self-check for `metric`, `statusClass`, and `displayPF`.
-- Added Research UI helper self-check for `metric`, `displayPF`, and `researchMetric`.
-- No trading/research thresholds or signal logic were changed.
+## Paper Research
+المستويات والنتائج للبحث والمحاكاة فقط. Technical Score وOOS ليست احتمالات نجاح مستقبلية.
