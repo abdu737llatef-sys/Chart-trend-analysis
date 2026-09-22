@@ -209,3 +209,12 @@ table{width:100%;border-collapse:collapse;min-width:760px}th,td{padding:9px 8px;
 
 /* V5.6.7.4 */
 .unifiedNote{padding:10px 12px;border:1px solid #2f5f78;border-radius:12px;background:#0b1d2e;color:#cfe8f2;line-height:1.7}
+
+.statusWatch{background:#2b2617;border:1px solid #8a6a2d;color:#ffd27d}
+.decision.watch{background:#2b2617;border:1px solid #8a6a2d;color:#ffd27d}
+.filterWatch{border-color:#6f5b2b!important;background:linear-gradient(180deg,#101d31,#171b22)!important}
+.edgeReadiness{margin-top:12px;padding:12px;border-radius:12px;border:1px solid #2a4268;background:#0d1a2e}
+.edgeReadiness.enginePass{border-color:#347161}.edgeReadiness.engineWarn{border-color:#8a6a2d}.edgeReadiness.engineFail{border-color:#7d354a}
+.watchExplainer{margin-top:12px;padding:12px;border:1px solid #6f5b2b;border-radius:12px;background:#171b22;color:#d9c898}
+
+.watchBar{display:flex;gap:10px;align-items:center;margin-top:10px}.secondary{padding:11px 14px;border-radius:12px;border:1px solid #38547d;background:#13243d;color:#eaf1ff;font-weight:800}.watchOff,.watchOn{padding:8px 12px;border-radius:999px;font-weight:900}.watchOff{background:#321923;color:#ff9caf;border:1px solid #7d354a}.watchOn{background:#132d2a;color:#7cebc6;border:1px solid #347161}

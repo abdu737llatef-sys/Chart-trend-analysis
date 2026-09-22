@@ -2,7 +2,7 @@ const $=id=>document.getElementById(id);
 let deferredPrompt=null,currentLive=null,currentTf='H1';
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
- const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.5',{updateViaCache:'none'});await reg.update();
+ const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.6',{updateViaCache:'none'});await reg.update();
 }catch(e){console.warn(e);}});
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('installBtn').classList.remove('hidden');});
 $('installBtn').onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('installBtn').classList.add('hidden');};
@@ -391,38 +391,45 @@ function confidenceTier(hist,integrity,techScore){
 }
 function finalDecision(frame,cfg){
  const a=frame.a,h=a.side===1?frame.oos.long:frame.oos.short,needN=requiredSample(frame.tf,cfg),e=frame.execution;
- const reasons=[];
- if(a.side===0)reasons.push('Current setup is neutral');
- if(frame.veto)reasons.push('Higher-timeframe veto');
- if(a.side&&h.n<needN)reasons.push(`Directional OOS N ${h.n} < ${needN}`);
- if(a.side&&h.acc<cfg.minAcc)reasons.push(`Directional OOS accuracy ${(h.acc*100).toFixed(1)}% < ${(cfg.minAcc*100).toFixed(0)}%`);
- if(a.side&&h.pf<cfg.minPF)reasons.push(`Directional cost-adjusted PF ${displayPF(h.pf,h.n)} < ${cfg.minPF.toFixed(2)}`);
- if(a.side&&h.wilson<cfg.minWilson)reasons.push(`Directional Wilson95 ${(h.wilson*100).toFixed(1)}% < ${(cfg.minWilson*100).toFixed(0)}%`);
+ const hard=[];
+ if(a.side===0)hard.push('Current setup is neutral');
+ if(frame.veto)hard.push('Higher-timeframe veto');
+ if(a.side&&h.n<needN)hard.push(`Directional OOS N ${h.n} < ${needN}`);
+ if(a.side&&h.acc<cfg.minAcc)hard.push(`Directional OOS accuracy ${(h.acc*100).toFixed(1)}% < ${(cfg.minAcc*100).toFixed(0)}%`);
+ if(a.side&&h.pf<cfg.minPF)hard.push(`Directional cost-adjusted PF ${displayPF(h.pf,h.n)} < ${cfg.minPF.toFixed(2)}`);
+ if(a.side&&h.wilson<cfg.minWilson)hard.push(`Directional Wilson95 ${(h.wilson*100).toFixed(1)}% < ${(cfg.minWilson*100).toFixed(0)}%`);
+ if(frame.integrity.score<70)hard.push(`Integrity ${frame.integrity.score.toFixed(1)} < 70`);
+ if(frame.integrity.coverage<.50)hard.push(`Integrity coverage ${(frame.integrity.coverage*100).toFixed(0)}% < 50%`);
+ if(hard.length)return{status:'BLOCKED',reasons:hard,needN};
 
- if(a.side){
-   if(!e?.available)reasons.push('Adaptive Entry execution validation unavailable');
-   else{
-     if(e.stats.resolved<e.needN)reasons.push(`Execution OOS N ${e.stats.resolved} < ${e.needN}`);
-     if(e.stats.pf<1.10)reasons.push(`Adaptive Entry execution PF ${displayPF(e.stats.pf,e.stats.resolved)} < 1.10`);
-     if(e.stats.avgR<=0)reasons.push(`Adaptive Entry expectancy ${e.stats.avgR.toFixed(3)}R ≤ 0`);
-     if(e.stats.wilson<.40)reasons.push(`Execution Wilson95 ${(e.stats.wilson*100).toFixed(1)}% < 40%`);
-     if(!e.foldPass)reasons.push(`Execution fold stability failed: ${e.profitableFolds}/${e.eligibleFolds} profitable folds; median PF ${displayPF(e.medianFoldPF,999)}`);
-     if(e.regimeState==='SKIP_SETUP')reasons.push(`Current regime ${e.currentRegime}: historical execution gate says SKIP`);
-   }
- }
- if(frame.integrity.score<70)reasons.push(`Integrity ${frame.integrity.score.toFixed(1)} < 70`);
- if(frame.integrity.coverage<.50)reasons.push(`Integrity coverage ${(frame.integrity.coverage*100).toFixed(0)}% < 50%`);
- if(reasons.length)return{status:'BLOCKED',reasons,needN};
+ const watch=[];
+ if(!e?.available)return{status:'WATCHLIST',reasons:['Directional layer passed, but Adaptive Entry execution validation is unavailable'],needN};
+ if(e.stats.resolved<e.needN)watch.push(`Execution OOS N ${e.stats.resolved} < ${e.needN}`);
+ if(e.stats.pf<1.10)watch.push(`Adaptive Entry execution PF ${displayPF(e.stats.pf,e.stats.resolved)} < 1.10`);
+ if(e.stats.avgR<.02)watch.push(`Adaptive Entry expectancy ${e.stats.avgR.toFixed(3)}R < 0.020R`);
+ if(e.stats.wilson<.42)watch.push(`Execution Wilson95 ${(e.stats.wilson*100).toFixed(1)}% < 42%`);
+ if(!e.foldPass)watch.push(`Execution fold stability ${e.profitableFolds}/${e.eligibleFolds}; median PF ${displayPF(e.medianFoldPF,999)} — need 3 profitable folds and median PF ≥ 1.05`);
+ if(e.regimeState==='SKIP_SETUP')return{status:'BLOCKED',reasons:[`Current regime ${e.currentRegime}: historical execution gate says SKIP`,...watch],needN};
+ if(e.regimeState!=='ALLOW')watch.push(`Current regime ${e.currentRegime}: ${e.regimeState} — watch only until regime evidence is validated`);
+ if(watch.length)return{status:'WATCHLIST',reasons:watch,needN};
 
  let status=confidenceTier(h,frame.integrity,a.score);
- const notes=['Directional OOS gates passed','Adaptive Entry execution gate passed'];
- if(e?.regimeState==='ALLOW')notes.push(`Current regime ${e.currentRegime}: ALLOW`);
- else if(e?.regimeState){status='PRELIMINARY';notes.push(`Current regime ${e.currentRegime}: ${e.regimeState} — confidence capped`);}
- if(e?.robustness==='DEVELOPING'&&status==='HIGH CONFIDENCE')status='CONFIRMED';
- if(e?.robustness==='DEVELOPING'&&status==='CONFIRMED'&&e.regimeCaution)status='PRELIMINARY';
- notes.push(`Execution robustness: ${e?.robustness||'N/A'}`);
+ if(e.robustness==='STRONG_RESEARCH_EDGE'&&status!=='PRELIMINARY')status='HIGH CONFIDENCE';
+ else if(status==='PRELIMINARY')status='CONFIRMED';
+ const notes=['Directional OOS gates passed','Adaptive Entry execution gate passed',`Current regime ${e.currentRegime}: ALLOW`,`Execution robustness: ${e.robustness}`];
  return{status,reasons:notes,needN};
 }
+function edgeReadiness(frame){
+ const e=frame.execution;
+ if(!frame.a.side||!e?.available)return{label:'NO EDGE EVIDENCE',cls:'engineFail',details:'No side-specific execution sample'};
+ const strong=e.stats.resolved>=200&&e.stats.pf>=1.20&&e.stats.avgR>=.05&&e.stats.wilson>=.50&&e.profitableFolds>=3&&e.medianFoldPF>=1.15&&e.regimeState==='ALLOW'&&e.regimeStats.resolved>=50&&e.regimeStats.pf>=1.15;
+ if(strong)return{label:'STRONG RESEARCH EDGE CANDIDATE',cls:'enginePass',details:'Needs independent holdout + forward paper confirmation before treating as robust'};
+ const research=e.stats.resolved>=100&&e.stats.pf>=1.10&&e.stats.avgR>=.02&&e.stats.wilson>=.42&&e.foldPass&&e.regimeState==='ALLOW';
+ if(research)return{label:'RESEARCH EDGE',cls:'enginePass',details:'Positive execution edge in this sample; not proof of future performance'};
+ const developing=e.stats.pf>=.95&&e.stats.avgR>=0&&e.regimeState!=='SKIP_SETUP';
+ return developing?{label:'DEVELOPING / WATCHLIST',cls:'engineWarn',details:'Near break-even or under-validated'}:{label:'NO ROBUST EXECUTION EDGE',cls:'engineFail',details:'Execution evidence remains weak'};
+}
+
 function nearQualified(frame,cfg){
  const a=frame.a;if(!a.side||frame.veto||frame.integrity.score<70||frame.integrity.coverage<.50)return false;
  const h=a.side===1?frame.oos.long:frame.oos.short,needN=requiredSample(frame.tf,cfg),e=frame.execution;
@@ -437,7 +444,7 @@ function nearQualified(frame,cfg){
 
 function createScenarioIfNeeded(frame,cs,symbol){
  const d=frame.decision;
- if(!frame.a.side||!(d.status!=='BLOCKED'||frame.near)||!frame.levels)return;
+ if(!frame.a.side||!(['WATCHLIST','PRELIMINARY','CONFIRMED','HIGH CONFIDENCE'].includes(d.status)||frame.near)||!frame.levels)return;
  let rows=loadScenarios(),active=rows.filter(x=>x.symbol===symbol&&x.tf===frame.tf&&!['TP2_HIT','STOPPED','INVALIDATED','EXPIRED','AMBIGUOUS'].includes(x.state)).at(-1);
  if(active)return;
  const L=frame.levels,initialState=
@@ -449,7 +456,7 @@ function createScenarioIfNeeded(frame,cs,symbol){
    lastUpdate:Date.now(),entry:L.entry,stop:L.stop,tp1:L.tp1,tp2:L.tp2,
    mode:L.mode,entryReason:L.entryReason,triggerMode:L.triggerMode,breakoutLevel:L.breakoutLevel,
    retestLow:L.retestLow,retestHigh:L.retestHigh,
-   referenceOnly:d.status==='BLOCKED',sourceStatus:d.status,
+   referenceOnly:['BLOCKED','WATCHLIST'].includes(d.status),sourceStatus:d.status,
    expiryBars:expiryBars(frame.tf),barCount:0,
    resistanceStrength:L.resistanceStrength,supportStrength:L.supportStrength,
    resistanceTouches:L.resistanceTouches,supportTouches:L.supportTouches,
@@ -1009,7 +1016,7 @@ function renderResearchResult(symbol,tf,costBps,result,historyN){
 async function runHistoricalResearch(){
  const b=$('runResearchBtn');b.disabled=true;
  const symbol=$('researchSymbol').value.trim().toUpperCase(),market=$('researchMarket').value,tf=$('researchTf').value,costBps=+$('researchCostBps').value;
- if(tf==='D1'){ $('researchStatus').textContent='D1 Research معطّل في V5.6.7.5 حتى يتوفر مسار بيانات أعمق مناسب للمتصفح.';b.disabled=false;return; }
+ if(tf==='D1'){ $('researchStatus').textContent='D1 Research معطّل في V5.6.7.6 حتى يتوفر مسار بيانات أعمق مناسب للمتصفح.';b.disabled=false;return; }
  $('researchStatus').textContent='جاري جلب تاريخ MTF متداخل فعليًا...';
  try{
    const needs=tf==='H1'
@@ -1027,7 +1034,7 @@ async function runHistoricalResearch(){
    const result=buildHistoricalResearch(sets,tf,costBps);
    if(!result.records.length)throw new Error('لم يتم العثور على إشارات كاملة بعد تطبيق MTF + Higher‑TF veto.');
    renderResearchResult(symbol,tf,costBps,result,sets[tf].length);
-   $('researchStatus').textContent=`اكتمل V5.6.7.5 — ${result.records.length} إشارة بعد MTF parity + veto.`;
+   $('researchStatus').textContent=`اكتمل V5.6.7.6 — ${result.records.length} إشارة بعد MTF parity + veto.`;
  }catch(e){$('researchStatus').textContent='خطأ في Historical Simulator: '+e.message;}
  finally{b.disabled=false;}
 }
@@ -1059,7 +1066,7 @@ $('runLiveBtn').onclick=async()=>{
      const integrity=await liveIntegrity(symbol,market,a.price,loaded[i]);
      const veto=higherTfVeto(tf,a.side,finals);
      const frame={tf,a,oos,execution,integrity,veto,levels:a.side?paperLevels(a):null,candles:loaded[i]};
-     frame.decision=finalDecision(frame,cfg);frame.near=frame.decision.status==='BLOCKED'&&nearQualified(frame,cfg);
+     frame.decision=finalDecision(frame,cfg);frame.near=frame.decision.status==='WATCHLIST'||(frame.decision.status==='BLOCKED'&&nearQualified(frame,cfg));
      updateScenarioLifecycle(symbol,frame,loaded[i],executionBars[i]);createScenarioIfNeeded(frame,loaded[i],symbol);
      frames.push(frame);
    }
@@ -1072,13 +1079,13 @@ $('runLiveBtn').onclick=async()=>{
    // UI helper self-check: fail with a precise message instead of a blank dashboard.
    if(typeof metric!=='function'||typeof statusClass!=='function'||typeof displayPF!=='function')throw new Error('UI helper initialization failed: metric/statusClass/displayPF');
    currentTf='H1';renderLive();
-   $('status').textContent='اكتمل V5.6.7.5: directional OOS + Adaptive Entry execution validation + regime/fold gate + live integrity.';
+   $('status').textContent='اكتمل V5.6.7.6: directional OOS + Adaptive Entry execution validation + hard regime gate + stronger execution gate + live integrity.';
  }catch(e){$('status').textContent='خطأ: '+e.message;}
  finally{b.disabled=false;}
 };
 
 function metric(label,value,cls=''){return`<div class="metric"><small>${label}</small><b class="${cls}">${value}</b></div>`;}
-function statusClass(s){return s==='BLOCKED'?'statusBlocked':s==='PRELIMINARY'?'statusPrelim':s==='CONFIRMED'?'statusConfirmed':'statusHigh';}
+function statusClass(s){return s==='BLOCKED'?'statusBlocked':s==='WATCHLIST'?'statusWatch':s==='PRELIMINARY'?'statusPrelim':s==='CONFIRMED'?'statusConfirmed':'statusHigh';}
 
 function renderLive(){
  const x=currentLive;
@@ -1097,7 +1104,7 @@ function renderLive(){
    <div class="direction ${f.a.side===1?'bullish':f.a.side===-1?'bearish':'neutral'}">${f.a.side===1?'BULLISH':f.a.side===-1?'BEARISH':'NEUTRAL'}</div>
    <div class="score">${f.a.score.toFixed(1)}</div>
    <p class="muted">${f.tf==='D1'?f.a.regime:(f.a.session+' • '+f.a.regime)}</p>
-   <div class="decision ${f.decision.status==='BLOCKED'?'block':'allow'}">${f.decision.status}</div>
+   <div class="decision ${f.decision.status==='BLOCKED'?'block':f.decision.status==='WATCHLIST'?'watch':'allow'}">${f.decision.status}</div>
  </div>`).join('');
  $('tfTabs').innerHTML=x.frames.map(f=>`<button class="tab ${f.tf===currentTf?'active':''}" data-tf="${f.tf}">${f.tf}</button>`).join('');
  $('tfTabs').querySelectorAll('.tab').forEach(b=>b.onclick=()=>{currentTf=b.dataset.tf;$('tfTabs').querySelectorAll('.tab').forEach(z=>z.classList.toggle('active',z.dataset.tf===currentTf));renderTf();});
@@ -1154,6 +1161,7 @@ function renderTf(){
    <p class="muted">${esc(f.oos.validationMode||'Timeframe-specific validation')}<br>تم تطبيق Higher‑TF veto قبل إدخال الإشارة في OOS. هذه إحصاءات تاريخية وليست احتمالًا مضمونًا.</p>`;
 
  const e=f.execution;
+ const edge=edgeReadiness(f);
  const regimeClass=e?.regimeState==='ALLOW'?'enginePass':e?.regimeState==='SKIP_SETUP'?'engineFail':'engineWarn';
  $('tfExecution').innerHTML=`<h2>3 — Adaptive Entry Execution Validation</h2>
    <p class="muted">هذه الطبقة تختبر نفس نموذج التنفيذ المستخدم في Paper Scenario: اختراق/إعادة اختبار حسب Adaptive Entry V2 → تأكيد بشمعة مغلقة → تنفيذ بحثي عند Open الشمعة التالية → Stop/TP1 فعليان بالنسبة لسعر التنفيذ → تكاليف البحث. لذلك قد ينجح Directional OOS بينما تُحجب الفكرة هنا.</p>
@@ -1163,8 +1171,8 @@ function renderTf(){
      <div class="layerMetric"><small>Triggered</small><b>${e.stats.triggered} • ${pct(e.stats.triggerRate)}</b></div>
      <div class="layerMetric"><small>Resolved execution N</small><b class="${e.stats.resolved>=e.needN?'enginePass':'engineFail'}">${e.stats.resolved} / ${e.needN}</b></div>
      <div class="layerMetric"><small>Execution PF after costs</small><b class="${e.stats.pf>=1.10?'enginePass':'engineFail'}">${displayPF(e.stats.pf,e.stats.resolved)}</b></div>
-     <div class="layerMetric"><small>Average net R</small><b class="${e.stats.avgR>0?'enginePass':'engineFail'}">${e.stats.avgR.toFixed(3)}R</b></div>
-     <div class="layerMetric"><small>Execution Wilson 95%</small><b class="${e.stats.wilson>=.40?'enginePass':'engineFail'}">${pct(e.stats.wilson)}</b></div>
+     <div class="layerMetric"><small>Average net R</small><b class="${e.stats.avgR>=.02?'enginePass':'engineFail'}">${e.stats.avgR.toFixed(3)}R</b></div>
+     <div class="layerMetric"><small>Execution Wilson 95%</small><b class="${e.stats.wilson>=.42?'enginePass':'engineFail'}">${pct(e.stats.wilson)}</b></div>
      <div class="layerMetric"><small>Max drawdown</small><b>${e.stats.maxDD.toFixed(2)}R</b></div>
      <div class="layerMetric"><small>Fold stability</small><b class="${e.foldPass?'enginePass':'engineFail'}">${e.profitableFolds}/${e.eligibleFolds} profitable • median PF ${displayPF(e.medianFoldPF,999)}</b></div>
      <div class="layerMetric"><small>Current regime</small><b>${esc(e.currentRegime||'N/A')}</b></div>
@@ -1172,7 +1180,8 @@ function renderTf(){
      <div class="layerMetric"><small>Regime sample / PF</small><b>${e.regimeStats.resolved} • ${displayPF(e.regimeStats.pf,e.regimeStats.resolved)}</b></div>
    </div>
    <div class="foldGrid">${e.folds.map(z=>`<div class="foldBox"><small>Execution Fold ${z.fold}</small><b>${z.resolved>=10?('PF '+displayPF(z.pf,z.resolved)):'small N'}</b><small>N ${z.resolved} • Avg ${z.avgR.toFixed(3)}R</small></div>`).join('')}</div>
-   <div class="overlapNote">Hard gate: global execution expectancy + fold stability + no regime SKIP. If current regime sample is insufficient, confidence is capped rather than treated as proof.</div>`:'<div class="hiddenLevels">لا يوجد اتجاه فني صالح لتشغيل Execution Validation.</div>'}`;
+   <div class="edgeReadiness ${edge.cls}"><b>Edge Readiness:</b> ${esc(edge.label)}<br><small>${esc(edge.details)}</small></div>
+   <div class="overlapNote">Hard gate V5.6.7.6: execution PF ≥1.10 • AvgR ≥0.020R • Wilson ≥42% • 3 profitable eligible folds • median PF ≥1.05 • current regime must be ALLOW. Under-sampled/developing regimes become WATCHLIST, not Confirmed.</div>`:'<div class="hiddenLevels">لا يوجد اتجاه فني صالح لتشغيل Execution Validation.</div>'}`;
 
  const flags=f.integrity.flags?.length?f.integrity.flags.map(x=>`<span class="integrityFlag">${esc(x)}</span>`).join(''):'<span class="integrityOk">No major live integrity flag</span>';
  $('tfIntegrity').innerHTML=`<h2>4 — Market Integrity Engine</h2>
@@ -1188,13 +1197,13 @@ function renderTf(){
  $('tfLifecycle').innerHTML=lifecycleCard(currentLive.symbol,f);
  $('paperJournal').innerHTML=renderJournal(currentLive.symbol);
  const clearBtn=$('clearJournalBtn');if(clearBtn)clearBtn.onclick=()=>{saveScenarios(loadScenarios().filter(x=>x.symbol!==currentLive.symbol));renderTf();};
- $('tfScenario').className=`card ${d.status==='BLOCKED'?'filterBlocked':'filterAllowed'}`;
+ $('tfScenario').className=`card ${d.status==='BLOCKED'?'filterBlocked':d.status==='WATCHLIST'?'filterWatch':'filterAllowed'}`;
  if(d.status==='BLOCKED'&&!f.near){
    $('tfScenario').innerHTML=`<h2>${f.tf} — Paper Scenario</h2><div class="decision block">BLOCKED</div><div class="hiddenLevels">النتيجة ليست قريبة بما يكفي من شروط التحقق، لذلك لا تُعرض مستويات مرجعية.</div>`;
- }else if(d.status==='BLOCKED'&&f.near){
+ }else if((d.status==='BLOCKED'&&f.near)||d.status==='WATCHLIST'){
    const L=f.levels,risk=Math.abs(L.entry-L.stop),rr1=risk?Math.abs(L.tp1-L.entry)/risk:0,rr2=risk?Math.abs(L.tp2-L.entry)/risk:0;
    $('tfScenario').innerHTML=`<h2>${f.tf} — Paper Reference Scenario</h2>
-     <div class="decision block">BLOCKED — NEAR-QUALIFIED</div><span class="referenceBadge">REFERENCE ONLY • NOT QUALIFIED</span>
+     <div class="decision ${d.status==='WATCHLIST'?'watch':'block'}">${d.status==='WATCHLIST'?'WATCHLIST — RESEARCH ONLY':'BLOCKED — NEAR-QUALIFIED'}</div><span class="referenceBadge">REFERENCE ONLY • NOT EXECUTION-QUALIFIED</span>
      <div class="levels4"><div class="level"><small>Paper Reference Entry</small><strong>${fmt(L.entry,6)}</strong></div><div class="level"><small>Paper Reference Stop</small><strong>${fmt(L.stop,6)}</strong></div><div class="level"><small>Paper Reference TP1</small><strong>${fmt(L.tp1,6)}</strong><div class="rankTag">R:R ${rr1.toFixed(2)}</div></div><div class="level"><small>Paper Reference TP2</small><strong>${fmt(L.tp2,6)}</strong><div class="rankTag">R:R ${rr2.toFixed(2)}</div></div></div>
      <div class="referenceScenario"><b>Entry model:</b> ${esc(L.mode)}<br><b>Why this model:</b> ${esc(L.entryReason||'Adaptive Entry V2')}<br><b>Pre-breakout quality:</b> ${Number.isFinite(L.preBreakoutQuality)?fmt(L.preBreakoutQuality,1)+'/100':'N/A'}<br>
      ${L.triggerMode.includes('RETEST')?`<b>Retest zone:</b> ${fmt(L.retestLow,6)} – ${fmt(L.retestHigh,6)}<br>`:''}
@@ -1216,6 +1225,49 @@ function renderTf(){
  </div>`;
 }
 
+
+let researchWatchTimer=null,watchOpenTimes={},watchAlertKeys=new Set();
+function watchEnabled(){return localStorage.getItem('trend_research_watch_v5676')==='1';}
+function updateWatchUi(){const b=$('toggleWatchBtn'),st=$('watchState');if(!b||!st)return;const on=!!researchWatchTimer;st.textContent=on?'ON • PAPER RESEARCH':'OFF';st.className=on?'watchOn':'watchOff';b.textContent=on?'إيقاف Research Watch':'تشغيل Research Watch';}
+function sendResearchNotice(title,body,key){
+ if(watchAlertKeys.has(key))return;watchAlertKeys.add(key);
+ try{if('Notification'in window&&Notification.permission==='granted')new Notification(title,{body,icon:'icon-192.png'});}catch{}
+ const st=$('status');if(st)st.textContent=`Research Watch: ${body}`;
+}
+async function researchWatchPoll(){
+ if(!currentLive)return;
+ const intervalMap={M15:'15m',H1:'1h',D1:'1d'};
+ const frames=currentLive.frames.filter(f=>f.a.side&&['WATCHLIST','PRELIMINARY','CONFIRMED','HIGH CONFIDENCE'].includes(f.decision.status));
+ for(const f of frames){
+   try{
+     const bar=await fetchCurrentKline(currentLive.symbol,intervalMap[f.tf],currentLive.market);if(!bar)continue;
+     if(watchOpenTimes[f.tf]==null)watchOpenTimes[f.tf]=bar.time;
+     else if(bar.time!==watchOpenTimes[f.tf]){
+       watchOpenTimes[f.tf]=bar.time;
+       sendResearchNotice('New closed candle',`${currentLive.symbol} ${f.tf}: شمعة جديدة أغلقت؛ سيتم تحديث التحليل البحثي.`,`newbar:${currentLive.symbol}:${f.tf}:${bar.time}`);
+       setTimeout(()=>$('runLiveBtn')?.click(),250);
+     }
+     const L=f.levels;if(!L||!Number.isFinite(bar.close))continue;
+     const px=bar.close,atrv=Math.max(f.a.atr||0,Math.abs(px)*.001,1e-12),dist=Math.abs(px-L.entry)/atrv;
+     if(dist<=.25)sendResearchNotice('Paper level nearby',`${currentLive.symbol} ${f.tf}: السعر اقترب من Paper reference (${dist.toFixed(2)} ATR). راقب الإغلاق/التأكيد فقط.`,`near:${currentLive.symbol}:${f.tf}:${Math.floor(bar.time/60000)}:${Math.round(L.entry/atrv)}`);
+     if(Number.isFinite(L.retestLow)&&Number.isFinite(L.retestHigh)&&px>=Math.min(L.retestLow,L.retestHigh)&&px<=Math.max(L.retestLow,L.retestHigh))
+       sendResearchNotice('Retest zone watch',`${currentLive.symbol} ${f.tf}: السعر داخل Retest zone. يلزم تأكيد شمعة مغلقة قبل تغيير الحالة البحثية.`,`retest:${currentLive.symbol}:${f.tf}:${bar.time}`);
+     if(Number.isFinite(L.breakoutLevel)){
+       const crossed=f.a.side===1?px>=L.breakoutLevel:px<=L.breakoutLevel;
+       if(crossed)sendResearchNotice('Breakout watch',`${currentLive.symbol} ${f.tf}: السعر تجاوز مستوى الاختراق داخل الشمعة؛ Wick وحده لا يكفي، انتظار الإغلاق.`,`break:${currentLive.symbol}:${f.tf}:${bar.time}`);
+     }
+   }catch{}
+ }
+}
+async function startResearchWatch(){
+ if(researchWatchTimer)return;
+ if('Notification'in window&&Notification.permission==='default'){try{await Notification.requestPermission();}catch{}}
+ localStorage.setItem('trend_research_watch_v5676','1');watchOpenTimes={};watchAlertKeys.clear();
+ researchWatchTimer=setInterval(researchWatchPoll,60000);updateWatchUi();researchWatchPoll();
+}
+function stopResearchWatch(){if(researchWatchTimer){clearInterval(researchWatchTimer);researchWatchTimer=null;}localStorage.setItem('trend_research_watch_v5676','0');updateWatchUi();}
+if($('toggleWatchBtn'))$('toggleWatchBtn').onclick=()=>researchWatchTimer?stopResearchWatch():startResearchWatch();
+
 if($('runResearchBtn'))$('runResearchBtn').onclick=runHistoricalResearch;
 try{saveScenarios(loadScenarios().map(migrateScenarioText));}catch{}
 window.addEventListener('load',()=>{
@@ -1224,3 +1276,5 @@ window.addEventListener('load',()=>{
    if(sym&&$('liveSymbol')){$('liveSymbol').value=sym.toUpperCase();setTimeout(()=>$('runLiveBtn')?.click(),250);}
  }catch(e){}
 });
+
+window.addEventListener('load',()=>{updateWatchUi();if(watchEnabled())setTimeout(startResearchWatch,500);});

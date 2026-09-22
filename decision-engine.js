@@ -435,34 +435,36 @@ function executionValidation(sets,tf,costBps=10,pwf=null,side=null,currentA=null
  const needN=validationSpec(tf).minN;
  // This gate validates the actual Adaptive Entry V2 lifecycle, not only directional accuracy.
  // A positive expectancy + PF above 1.10 is required after the same research cost.
- const globalPass=stats.resolved>=needN&&stats.pf>=1.10&&stats.avgR>0&&stats.wilson>=.40;
+ const globalPass=stats.resolved>=needN&&stats.pf>=1.10&&stats.avgR>=.02&&stats.wilson>=.42;
  const eligibleFolds=folds.filter(x=>x.resolved>=10),profitableFolds=eligibleFolds.filter(x=>x.pf>=1.0&&x.avgR>=0).length;
  const medPF=eligibleFolds.length?median(eligibleFolds.map(x=>x.pf)):0;
- const foldPass=eligibleFolds.length>=3&&profitableFolds>=2&&medPF>=1.0;
+ const foldPass=eligibleFolds.length>=3&&profitableFolds>=3&&medPF>=1.05;
  const currentRegime=currentA?executionRegimeBucket({...currentA,side}):null;
  const regimeStats=currentRegime?aggregateExecution(rows.filter(x=>x.regime===currentRegime)):empty;
  const regimeMinN=tf==='M15'?30:tf==='H1'?25:20;
  let regimeState='INSUFFICIENT_SAMPLE',regimePass=false;
  if(regimeStats.resolved>=regimeMinN){
-   if(regimeStats.pf>=1.10&&regimeStats.avgR>0){regimeState='ALLOW';regimePass=true;}
-   else if(regimeStats.pf<.95||regimeStats.avgR<=-.02)regimeState='SKIP_SETUP';
+   if(regimeStats.pf>=1.10&&regimeStats.avgR>=.02&&regimeStats.wilson>=.40){regimeState='ALLOW';regimePass=true;}
+   else if(regimeStats.pf<.95||regimeStats.avgR<=0)regimeState='SKIP_SETUP';
    else regimeState='WAIT_DEVELOPING';
  }
  const hardBlockReasons=[];
  if(stats.resolved<needN)hardBlockReasons.push('EXECUTION_N');
  if(stats.pf<1.10)hardBlockReasons.push('EXECUTION_PF');
- if(stats.avgR<=0)hardBlockReasons.push('EXECUTION_EXPECTANCY');
- if(stats.wilson<.40)hardBlockReasons.push('EXECUTION_WILSON');
+ if(stats.avgR<.02)hardBlockReasons.push('EXECUTION_EXPECTANCY');
+ if(stats.wilson<.42)hardBlockReasons.push('EXECUTION_WILSON');
  if(!foldPass)hardBlockReasons.push('FOLD_INSTABILITY');
  if(regimeState==='SKIP_SETUP')hardBlockReasons.push('REGIME_SKIP');
- // An under-sampled current regime is a caution rather than an automatic failure. This prevents
- // a tiny regime bucket from overriding a much larger global/fold sample, while still capping confidence.
- const hardPass=globalPass&&foldPass&&regimeState!=='SKIP_SETUP';
+ if(regimeState!=='ALLOW')hardBlockReasons.push('REGIME_NOT_VALIDATED');
+ // V5.6.7.6: the current regime is a real execution gate. Under-sampled or developing regimes
+ // can be monitored as research watchlists, but they do not qualify as execution-ready scenarios.
+ const hardPass=globalPass&&foldPass&&regimeState==='ALLOW';
  const pass=hardPass;
  const regimeCaution=regimeState!=='ALLOW';
  let robustness='WEAK';
- if(hardPass)robustness=regimeCaution?'DEVELOPING':'CONFIRMED';
- if(hardPass&&!regimeCaution&&stats.resolved>=100&&stats.pf>=1.20&&stats.avgR>=.03&&profitableFolds>=3&&medPF>=1.10&&regimeStats.pf>=1.20)robustness='STABLE';
+ if(globalPass&&foldPass&&regimeState!=='SKIP_SETUP')robustness='DEVELOPING';
+ if(hardPass)robustness='CONFIRMED';
+ if(hardPass&&stats.resolved>=200&&stats.pf>=1.20&&stats.avgR>=.05&&stats.wilson>=.50&&profitableFolds>=3&&medPF>=1.15&&regimeStats.resolved>=50&&regimeStats.pf>=1.15&&regimeStats.avgR>=.03)robustness='STRONG_RESEARCH_EDGE';
  return{
    available:true,pass,hardPass,robustness,reason:hardPass?'EXECUTION_GATE_PASS':'EXECUTION_GATE_FAIL',hardBlockReasons,
    stats,folds,regimes,currentRegime,regimeStats,regimeState,regimePass,regimeCaution,regimeMinN,
@@ -472,7 +474,7 @@ function executionValidation(sets,tf,costBps=10,pwf=null,side=null,currentA=null
 }
 
 root.UnifiedDecisionEngine={
- version:'5.6.7.5',
+ version:'5.6.7.6',
  validationSpec,technicalCore,contextScore,finalizeOne,finalizeCurrent,higherTfVeto,
  historicalSnapshot,fullStartIndex,purgedWalkForward,validationMode,paperLevels,entryQualityV2,adaptiveBreakoutDecision,
  executionValidation,executionRegimeBucket,aggregateExecution,LIVE_POLICY,

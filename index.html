@@ -6,17 +6,17 @@
   <meta name="theme-color" content="#06111f">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>Chart Trend Analyzer V5.6.7.5</title>
-  <link rel="manifest" href="manifest.webmanifest?v=5.6.7.5">
+  <title>Chart Trend Analyzer V5.6.7.6</title>
+  <link rel="manifest" href="manifest.webmanifest?v=5.6.7.6">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="style.css?v=5.6.7.5">
+  <link rel="stylesheet" href="style.css?v=5.6.7.6">
 </head>
 <body>
 <main class="wrap">
   <header class="topbar">
     <div>
-      <h1>Chart Trend Analyzer <span>V5.6.7.5</span></h1>
+      <h1>Chart Trend Analyzer <span>V5.6.7.6</span></h1>
       <p>Statistical Validation • Purged Walk‑Forward • Signal Lock • Paper Research</p>
     </div>
     <button id="installBtn" class="install hidden">تثبيت التطبيق</button>
@@ -24,10 +24,10 @@
 
   <section class="card scannerLaunch">
     <div>
-      <h2>Crypto Market Scanner V5.6.7.5</h2>
+      <h2>Crypto Market Scanner V5.6.7.6</h2>
       <p class="muted">Scanner للاكتشاف، لكن المرشح النهائي وLive MTF يستخدمان نفس Unified Decision Engine ونفس Directional OOS + Adaptive Entry Execution Gate + Market Integrity.</p>
     </div>
-    <a class="scannerLaunchBtn" href="scanner.html?v=5.6.7.5">فتح Market Scanner</a>
+    <a class="scannerLaunchBtn" href="scanner.html?v=5.6.7.6">فتح Market Scanner</a>
   </section>
 
   <section class="card">
@@ -98,8 +98,8 @@
     </div>
 
     <div id="researchControls" class="hidden">
-      <h2>V5.6.7.5 — Adaptive Entry V2 + Execution Validation</h2>
-      <p class="muted">يقارن نفس الإشارات التاريخية بين Breakout Close وBreakout + Retest وAdaptive Entry V2. النسخة الجديدة تفصل قرار الدخول عن إشارة الاتجاه: بعد إغلاق الاختراق يتم تقييم جودة شمعة الاختراق والزخم والحجم لتحديد Continuation أو Retest. التنفيذ البحثي عند Open الشمعة التالية فقط.</p>
+      <h2>V5.6.7.6 — Hard Execution Gate + Regime Validation</h2>
+      <p class="muted">يقارن نفس الإشارات التاريخية بين Breakout Close وBreakout + Retest وAdaptive Entry V2. هذه النسخة لا تكتفي بصحة الاتجاه: يجب أن يثبت نموذج التنفيذ نفسه PF موجبًا بعد التكلفة، Expectancy موجبة، استقرارًا عبر Folds، وأن تكون حالة السوق الحالية ALLOW قبل رفع السيناريو من WATCHLIST إلى Confirmed. التنفيذ البحثي عند Open الشمعة التالية فقط.</p>
       <div class="formgrid">
         <label>الرمز<input id="researchSymbol" value="ADAUSDT" placeholder="ADAUSDT"></label>
         <label>السوق
@@ -157,7 +157,7 @@
   </section>
 
   <section class="card architectureCard">
-    <h2>V5.6.7.5 Decision Architecture</h2>
+    <h2>V5.6.7.6 Decision Architecture</h2>
     <div class="architecture">
       <div class="archLayer">
         <span class="archNum">1</span>
@@ -171,12 +171,12 @@
       <div class="archArrow">↓</div>
       <div class="archLayer">
         <span class="archNum">3</span>
-        <div><b>Adaptive Entry Execution Validation</b><small>Same Paper lifecycle • next-candle-open execution • cost-adjusted execution PF/AvgR • fold stability • current-regime gate</small></div>
+        <div><b>Adaptive Entry Execution Validation</b><small>Same Paper lifecycle • next-candle-open execution • PF ≥1.10 • AvgR ≥0.020R • Wilson ≥42% • fold stability</small></div>
       </div>
       <div class="archArrow">↓</div>
       <div class="archLayer">
         <span class="archNum">4</span>
-        <div><b>Market Integrity Engine</b><small>Spread • Order-book depth • Cross-source check • Candle anomalies • Coverage</small></div>
+        <div><b>Hard Regime + Market Integrity Gate</b><small>Current regime must be ALLOW • under-sampled/developing = WATCHLIST • Spread • Depth • Cross-source • Anomalies</small></div>
       </div>
       <div class="archArrow">↓</div>
       <div class="archLayer finalLayer">
@@ -184,10 +184,10 @@
         <div><b>Final Status</b><small>BLOCKED • NEAR-QUALIFIED • PRELIMINARY • CONFIRMED • HIGH CONFIDENCE</small></div>
       </div>
     </div>
-    <p class="muted">Technical Score وFinal Status ليسا احتمال ربح. V5.6.7.5 يضيف بوابة مستقلة لاختبار قابلية تنفيذ Adaptive Entry V2 تاريخيًا؛ قد يكون الاتجاه صحيحًا لكن التنفيذ غير مجدٍ، وعندها يبقى السيناريو محجوبًا. كل المستويات Paper/Research فقط.</p>
+    <p class="muted">Technical Score وFinal Status ليسا احتمال ربح. V5.6.7.6 يجعل Regime الحالي بوابة فعلية بدل ملاحظة فقط، ويمنع ترقية سيناريو عندما تكون عينة التنفيذ ضعيفة أو غير مستقرة. Edge Readiness داخل النتائج يصف قوة الدليل البحثي فقط، وليس ضمانًا مستقبليًا. كل المستويات Paper/Research فقط.</p>
   </section>
 </main>
-<script src="decision-engine.js?v=5.6.7.5"></script>
-<script src="app.js?v=5.6.7.5"></script>
+<script src="decision-engine.js?v=5.6.7.6"></script>
+<script src="app.js?v=5.6.7.6"></script>
 </body>
 </html>

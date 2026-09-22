@@ -39,7 +39,7 @@ const FALLBACK_LARGE=['BTC','ETH','BNB','XRP','SOL','DOGE','ADA','TRX','AVAX','L
 const leveragedRe=/(UP|DOWN|BULL|BEAR|3L|3S)$/i;
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
-  const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.5',{updateViaCache:'none'});
+  const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.6',{updateViaCache:'none'});
   await reg.update();
 }catch(e){console.warn(e);}});
 
@@ -406,10 +406,10 @@ function rejectReason(x,cfg){
  else{
    if(x.execution.stats.resolved<x.execution.needN)a.push(`Execution N ${x.execution.stats.resolved}<${x.execution.needN}`);
    if(x.execution.stats.pf<1.10)a.push(`Execution PF ${displayPF(x.execution.stats.pf)}`);
-   if(x.execution.stats.avgR<=0)a.push(`Execution AvgR ${x.execution.stats.avgR.toFixed(3)}R`);
-   if(x.execution.stats.wilson<.40)a.push(`Execution Wilson95 ${(x.execution.stats.wilson*100).toFixed(1)}%`);
+   if(x.execution.stats.avgR<.02)a.push(`Execution AvgR ${x.execution.stats.avgR.toFixed(3)}R < 0.020R`);
+   if(x.execution.stats.wilson<.42)a.push(`Execution Wilson95 ${(x.execution.stats.wilson*100).toFixed(1)}% < 42%`);
    if(!x.execution.foldPass)a.push(`Execution folds ${x.execution.profitableFolds}/${x.execution.eligibleFolds}`);
-   if(x.execution.regimeState==='SKIP_SETUP')a.push(`Regime SKIP: ${x.execution.currentRegime}`);
+   if(x.execution.regimeState!=='ALLOW')a.push(`Regime ${x.execution.regimeState}: ${x.execution.currentRegime}`);
  }
  if(x.integrity.score<cfg.minIntegrity)a.push('Integrity');
  if(x.integrity.coverage<cfg.minCoverage)a.push('Integrity coverage');
@@ -527,9 +527,9 @@ function closestCards(rows,side,cfg){
    if(!x.execution?.available)gaps.push('Execution unavailable');
    else{
      if(x.execution.stats.pf<1.10)gaps.push(`Exec PF ${displayPF(x.execution.stats.pf)}`);
-     if(x.execution.stats.avgR<=0)gaps.push(`Exec AvgR ${x.execution.stats.avgR.toFixed(3)}R`);
+     if(x.execution.stats.avgR<.02)gaps.push(`Exec AvgR ${x.execution.stats.avgR.toFixed(3)}R`);
      if(!x.execution.foldPass)gaps.push('Exec fold instability');
-     if(x.execution.regimeState==='SKIP_SETUP')gaps.push(`Regime SKIP`);
+     if(x.execution.regimeState!=='ALLOW')gaps.push(`Regime ${x.execution.regimeState}`);
    }
    if(x.integrity.score<cfg.minIntegrity)gaps.push(`Integrity ${x.integrity.score.toFixed(1)}`);
    if(x.integrity.coverage<cfg.minCoverage)gaps.push(`Coverage ${Math.round(x.integrity.coverage*100)}%`);
@@ -541,7 +541,7 @@ function closestCards(rows,side,cfg){
    const sampleDistance=Math.max(0,cfg.minResolved-x.validation.resolved)*.25;
    const wilsonDistance=Math.max(0,cfg.minWilson-x.validation.wilson95)*100;
    const htfDistance=x.higherPass?0:15;
-   const execDistance=!x.execution?.available?25:(Math.max(0,1.10-x.execution.stats.pf)*20+Math.max(0,-x.execution.stats.avgR)*50+(x.execution.foldPass?0:10)+(x.execution.regimeState==='SKIP_SETUP'?20:0));
+   const execDistance=!x.execution?.available?25:(Math.max(0,1.10-x.execution.stats.pf)*20+Math.max(0,.02-x.execution.stats.avgR)*50+(x.execution.foldPass?0:10)+(x.execution.regimeState!=='ALLOW'?15:0));
    const distance=technicalDistance+accDistance+pfDistance+intDistance+covDistance+sampleDistance+wilsonDistance+htfDistance+execDistance;
    return{...x,gaps,distance};
  }).sort((a,b)=>a.distance-b.distance).slice(0,3);
@@ -565,7 +565,7 @@ function nearTable(rows){
  <tbody>${rows.slice(0,16).map(x=>`<tr><td class="coinCell">${esc(x.symbol)}</td><td>${x.side===1?'Bullish':'Bearish'}</td><td>${x.verified.toFixed(1)}</td><td class="${integrityClass(x.integrity.score)}">${x.integrity.score.toFixed(1)}</td><td>${(x.validation.acc*100).toFixed(1)}%</td><td>${displayPF(x.validation.pf)}</td><td>${x.execution?.available?displayPF(x.execution.stats.pf):'N/A'}</td><td>${esc(x.reason)}</td></tr>`).join('')}</tbody></table>`;
 }
 
-window.openFull=symbol=>{const m=$('scanMarket')?.value||'futures';location.href=`./?v=5.6.7.5&symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(m)}`;};
+window.openFull=symbol=>{const m=$('scanMarket')?.value||'futures';location.href=`./?v=5.6.7.6&symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(m)}`;};
 
 $('cancelScannerBtn').onclick=()=>{scannerCancelled=true;$('status').textContent='تم طلب الإيقاف؛ سيتوقف بعد انتهاء الطلبات الجارية.';};
 
@@ -654,7 +654,7 @@ $('runScannerBtn').onclick=async()=>{
    ['scannerSummary','bullishCard','bearishCard','closestGrid','integrityCard','nearMissCard'].forEach(id=>$(id).classList.remove('hidden'));
 
    const lowIntegrity=good.filter(x=>!x.integrity.pass).length,executionBlocked=good.filter(x=>x.side&&(!x.execution?.hardPass)).length;
-   $('scannerSummary').innerHTML=`<h2>V5.6.7.5 Unified Scanner Summary</h2><div class="metrics">
+   $('scannerSummary').innerHTML=`<h2>V5.6.7.6 Unified Scanner Summary</h2><div class="metrics">
      ${metric('Market-cap source',esc(u.source))}
      ${metric('Eligible universe',candidates.length)}
      ${metric('Deep-scanned',deep.length)}
@@ -675,7 +675,7 @@ $('runScannerBtn').onclick=async()=>{
    $('closestBearishTable').innerHTML=closestCards(near,-1,cfg);
    $('nearMissTable').innerHTML=nearTable(near);
 
-   $('status').textContent=`Stage 4/4 complete: ${bulls.length} Bullish و${bears.length} Bearish اجتازوا Directional + Execution + Integrity gates في V5.6.7.5.`;
+   $('status').textContent=`Stage 4/4 complete: ${bulls.length} Bullish و${bears.length} Bearish اجتازوا Directional + Execution + Integrity gates في V5.6.7.6.`;
  }catch(e){
    $('status').textContent=e.message==='Scan cancelled'?'تم إيقاف الفحص.':'خطأ أثناء الفحص: '+e.message;
  }finally{
