@@ -95,12 +95,13 @@ function technicalCore(cs){
  const resistanceTouches=separatedTouches(cs,resistance,levelTol,'R'),supportTouches=separatedTouches(cs,support,levelTol,'S');
  const resistanceStrength=clamp(28+resistanceTouches*16+(structure>=80?10:0)+(adxv>=25?8:0));
  const supportStrength=clamp(28+supportTouches*16+(structure<=20?10:0)+(adxv>=25?8:0));
+ const candleRange=Math.max(last.high-last.low,1e-12),candleBodyAtr=Math.abs(last.close-last.open)/Math.max(atrv||last.close*.002,1e-12),closeLocationLong=(last.close-last.low)/candleRange,closeLocationShort=(last.high-last.close)/candleRange;
 
  return{
    price:last.close,components,baseScore,baseWeight,
    structure,structureState,trend,momentum,strength,volumeFlow,srBreakout,
    rsi:rv,adx:adxv,atr:atrv,ema20:E20,ema50:E50,ema200:E200,macd:mac,macdSignal:sig,volumeRatio:vr,
-   support,resistance,resistanceTouches,supportTouches,resistanceStrength,supportStrength,session,regime,barTime:last.time,barCloseTime:last.closeTime
+   support,resistance,resistanceTouches,supportTouches,resistanceStrength,supportStrength,candleBodyAtr,closeLocationLong,closeLocationShort,session,regime,barTime:last.time,barCloseTime:last.closeTime
  };
 }
 
@@ -262,41 +263,42 @@ function validationMode(tf){
  return'D1 primary direction; lower timeframes do not rewrite D1';
 }
 
-const LIVE_POLICY={name:'Live Conservative',strongLevel:65,momentum:70,strength:65,volume:60};
+const LIVE_POLICY={name:'Adaptive V2 Live',breakoutCloseScore:78,strongLevel:85,strongPremium:5,minBodyAtr:.35,minCloseLocation:.62,minVolumeRatio:.90};
+function dirValueEntry(x,side){return side===1?x:100-x;}
+function entryQualityV2(a,policy=LIVE_POLICY){
+ const side=a.side||0;if(!side)return{score:50,decision:'RETEST_BIAS',reason:'NEUTRAL_DIRECTION'};
+ const dStructure=dirValueEntry(a.structure,side),dTrend=dirValueEntry(a.trend,side),dMomentum=dirValueEntry(a.momentum,side),dStrength=dirValueEntry(a.strength,side),dVolume=dirValueEntry(a.volumeFlow,side),dSR=dirValueEntry(a.srBreakout,side),dMtf=dirValueEntry(a.mtf??50,side);
+ let score=dStructure*.18+dTrend*.16+dMomentum*.17+dStrength*.12+dVolume*.11+dSR*.10+dMtf*.10;
+ if(a.regime==='Trending')score+=6;else if(a.regime==='Ranging')score-=8;
+ const levelStrength=side===1?(a.resistanceStrength||0):(a.supportStrength||0);if(levelStrength>=policy.strongLevel)score-=4;score=clamp(score);
+ return{score,decision:score>=policy.breakoutCloseScore?'CLOSE_CANDIDATE':'RETEST_BIAS',reason:score>=policy.breakoutCloseScore?'PRE_BREAKOUT_QUALITY_STRONG':'PRE_BREAKOUT_RETEST_BIAS',levelStrength};
+}
 function paperLevels(a,policy=LIVE_POLICY){
- const atrv=Math.max(a.atr,a.price*.002),buf=.08*atrv,retestTol=.22*atrv;
+ const atrv=Math.max(a.atr,a.price*.002),buf=.08*atrv,retestTol=.22*atrv,pre=entryQualityV2(a,policy);
  let entry,stop,tp1,tp2,mode,triggerMode,breakoutLevel,retestLow,retestHigh,entryReason;
- const highMomentum=a.momentum>=policy.momentum&&a.strength>=policy.strength&&a.volumeFlow>=policy.volume;
+ const levelStrength=a.side===1?(a.resistanceStrength||0):(a.supportStrength||0);
  if(a.side===1){
-   breakoutLevel=a.resistance;const strong=(a.resistanceStrength||0)>=policy.strongLevel;
-   if(a.price<=a.resistance+buf){
-     if(strong||!highMomentum){entryReason=strong?'STRONG_LEVEL':'INSUFFICIENT_MOMENTUM_VOLUME';mode=strong?'Closed-candle breakout + successful retest of strong resistance':'Closed-candle breakout + retest required (momentum/volume confirmation insufficient)';triggerMode='BREAKOUT_CLOSE_RETEST';retestLow=a.resistance-retestTol;retestHigh=a.resistance+retestTol;entry=a.resistance+.03*atrv;}
-     else{entryReason='HIGH_MOMENTUM_CONTINUATION';mode='Closed-candle breakout continuation — retest not required';triggerMode='BREAKOUT_CLOSE';entry=a.resistance+buf;}
-   }else{
-     if(strong||!highMomentum){entryReason=strong?'STRONG_BROKEN_LEVEL':'INSUFFICIENT_MOMENTUM_VOLUME';mode=strong?'Retest of broken resistance before continuation':'Retest of broken resistance required (momentum/volume confirmation insufficient)';triggerMode='RETEST_AFTER_BREAKOUT';retestLow=a.resistance-retestTol;retestHigh=a.resistance+retestTol;entry=a.resistance+.03*atrv;}
-     else{entryReason='HIGH_MOMENTUM_CONTINUATION';mode='Momentum continuation after confirmed close — retest not required';triggerMode='BREAKOUT_CLOSE';entry=a.price+.04*atrv;}
-   }
+   breakoutLevel=a.resistance;retestLow=a.resistance-retestTol;retestHigh=a.resistance+retestTol;
+   if(a.price<=a.resistance+buf){entryReason='AWAIT_BREAKOUT_QUALITY_V2';mode='Adaptive Entry V2 — closed-candle breakout, then choose momentum continuation or retest';triggerMode='ADAPTIVE_BREAKOUT_V2';entry=a.resistance+.03*atrv;}
+   else if(pre.decision==='CLOSE_CANDIDATE'){entryReason='POST_BREAKOUT_HIGH_QUALITY_V2';mode='Adaptive V2 momentum continuation after confirmed close';triggerMode='BREAKOUT_CLOSE';entry=a.price+.04*atrv;}
+   else{entryReason='POST_BREAKOUT_RETEST_BIAS_V2';mode='Adaptive V2 retest of broken resistance before continuation';triggerMode='RETEST_AFTER_BREAKOUT';entry=a.resistance+.03*atrv;}
    const structural=Math.min(a.support-.10*atrv,entry-.90*atrv);let risk=entry-structural;risk=Math.max(.90*atrv,Math.min(risk,1.80*atrv));stop=entry-risk;tp1=entry+1.20*risk;tp2=entry+2.00*risk;
  }else{
-   breakoutLevel=a.support;const strong=(a.supportStrength||0)>=policy.strongLevel;
-   if(a.price>=a.support-buf){
-     if(strong||!highMomentum){entryReason=strong?'STRONG_LEVEL':'INSUFFICIENT_MOMENTUM_VOLUME';mode=strong?'Closed-candle breakdown + successful retest of strong support':'Closed-candle breakdown + retest required (momentum/volume confirmation insufficient)';triggerMode='BREAKDOWN_CLOSE_RETEST';retestLow=a.support-retestTol;retestHigh=a.support+retestTol;entry=a.support-.03*atrv;}
-     else{entryReason='HIGH_MOMENTUM_CONTINUATION';mode='Closed-candle breakdown continuation — retest not required';triggerMode='BREAKDOWN_CLOSE';entry=a.support-buf;}
-   }else{
-     if(strong||!highMomentum){entryReason=strong?'STRONG_BROKEN_LEVEL':'INSUFFICIENT_MOMENTUM_VOLUME';mode=strong?'Retest of broken support before continuation':'Retest of broken support required (momentum/volume confirmation insufficient)';triggerMode='RETEST_AFTER_BREAKDOWN';retestLow=a.support-retestTol;retestHigh=a.support+retestTol;entry=a.support-.03*atrv;}
-     else{entryReason='HIGH_MOMENTUM_CONTINUATION';mode='Momentum continuation after confirmed close — retest not required';triggerMode='BREAKDOWN_CLOSE';entry=a.price-.04*atrv;}
-   }
+   breakoutLevel=a.support;retestLow=a.support-retestTol;retestHigh=a.support+retestTol;
+   if(a.price>=a.support-buf){entryReason='AWAIT_BREAKOUT_QUALITY_V2';mode='Adaptive Entry V2 — closed-candle breakdown, then choose momentum continuation or retest';triggerMode='ADAPTIVE_BREAKOUT_V2';entry=a.support-.03*atrv;}
+   else if(pre.decision==='CLOSE_CANDIDATE'){entryReason='POST_BREAKOUT_HIGH_QUALITY_V2';mode='Adaptive V2 momentum continuation after confirmed close';triggerMode='BREAKDOWN_CLOSE';entry=a.price-.04*atrv;}
+   else{entryReason='POST_BREAKOUT_RETEST_BIAS_V2';mode='Adaptive V2 retest of broken support before continuation';triggerMode='RETEST_AFTER_BREAKDOWN';entry=a.support-.03*atrv;}
    const structural=Math.max(a.resistance+.10*atrv,entry+.90*atrv);let risk=structural-entry;risk=Math.max(.90*atrv,Math.min(risk,1.80*atrv));stop=entry+risk;tp1=entry-1.20*risk;tp2=entry-2.00*risk;
  }
  return{entry,stop,tp1,tp2,mode,entryReason,triggerMode,breakoutLevel,retestLow,retestHigh,
    resistanceStrength:a.resistanceStrength||0,supportStrength:a.supportStrength||0,
-   resistanceTouches:a.resistanceTouches||0,supportTouches:a.supportTouches||0,policyName:policy.name};
+   resistanceTouches:a.resistanceTouches||0,supportTouches:a.supportTouches||0,policyName:policy.name,policyConfig:{...policy},preBreakoutQuality:pre.score,preDecision:pre.decision,levelStrength,atrRef:atrv,entryModelVersion:'AdaptiveEntryV2'};
 }
 
 root.UnifiedDecisionEngine={
- version:'5.6.7.3',
+ version:'5.6.7.4',
  validationSpec,technicalCore,contextScore,finalizeOne,finalizeCurrent,higherTfVeto,
- historicalSnapshot,fullStartIndex,purgedWalkForward,validationMode,paperLevels,
+ historicalSnapshot,fullStartIndex,purgedWalkForward,validationMode,paperLevels,entryQualityV2,LIVE_POLICY,
  wilsonLower95,atr,clamp,normBase
 };
 })(typeof window!=='undefined'?window:globalThis);

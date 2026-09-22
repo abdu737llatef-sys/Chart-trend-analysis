@@ -2,7 +2,7 @@ const $=id=>document.getElementById(id);
 let deferredPrompt=null,currentLive=null,currentTf='H1';
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
- const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.3',{updateViaCache:'none'});await reg.update();
+ const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.4',{updateViaCache:'none'});await reg.update();
 }catch(e){console.warn(e);}});
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('installBtn').classList.remove('hidden');});
 $('installBtn').onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('installBtn').classList.add('hidden');};
@@ -307,93 +307,77 @@ async function marketContext(){
  return{btc:ba.baseScore/ba.baseWeight,eth:ea.baseScore/ea.baseWeight,score,direction:score>=60?'Bullish':score<=40?'Bearish':'Neutral'};
 }
 const ADAPTIVE_POLICIES={
- LIVE:{name:'Live Conservative',strongLevel:65,momentum:70,strength:65,volume:60},
- BALANCED:{name:'Research Balanced',strongLevel:75,momentum:62,strength:58,volume:50},
- MOMENTUM:{name:'Research Momentum',strongLevel:85,momentum:55,strength:50,volume:45}
+ LIVE:{name:'Adaptive V2 Live',breakoutCloseScore:78,strongLevel:85,strongPremium:5,minBodyAtr:.35,minCloseLocation:.62,minVolumeRatio:.90},
+ BALANCED:{name:'Adaptive V2 Balanced',breakoutCloseScore:75,strongLevel:88,strongPremium:4,minBodyAtr:.30,minCloseLocation:.58,minVolumeRatio:.80},
+ MOMENTUM:{name:'Adaptive V2 Momentum',breakoutCloseScore:72,strongLevel:90,strongPremium:4,minBodyAtr:.28,minCloseLocation:.56,minVolumeRatio:.75}
 };
+function dirValue(x,side){return side===1?x:100-x;}
+function entryQualityV2(a,policy=ADAPTIVE_POLICIES.LIVE){
+ const side=a.side||0;if(!side)return{score:50,decision:'RETEST',reason:'NEUTRAL_DIRECTION'};
+ const dStructure=dirValue(a.structure,side),dTrend=dirValue(a.trend,side),dMomentum=dirValue(a.momentum,side),dStrength=dirValue(a.strength,side),dVolume=dirValue(a.volumeFlow,side),dSR=dirValue(a.srBreakout,side),dMtf=dirValue(a.mtf??50,side);
+ let score=dStructure*.18+dTrend*.16+dMomentum*.17+dStrength*.12+dVolume*.11+dSR*.10+dMtf*.10;
+ if(a.regime==='Trending')score+=6;else if(a.regime==='Ranging')score-=8;
+ const levelStrength=side===1?(a.resistanceStrength||0):(a.supportStrength||0);
+ if(levelStrength>=policy.strongLevel)score-=4;
+ score=clamp(score);
+ return{score,decision:score>=policy.breakoutCloseScore?'CLOSE_CANDIDATE':'RETEST_BIAS',reason:score>=policy.breakoutCloseScore?'PRE_BREAKOUT_QUALITY_STRONG':'PRE_BREAKOUT_RETEST_BIAS',levelStrength,dStructure,dTrend,dMomentum,dStrength,dVolume,dSR,dMtf};
+}
+function volumeRatioAt(cs,idx){
+ if(idx<1)return 1;const from=Math.max(0,idx-20),a=cs.slice(from,idx).map(x=>x.volume||0),m=a.length?mean(a):0;return m>0?(cs[idx].volume||0)/m:1;
+}
+function adaptiveBreakoutDecision(cs,idx,side,plan,policy=null){
+ policy=policy||plan.policyConfig||ADAPTIVE_POLICIES.LIVE;
+ const b=cs[idx],atrv=Math.max(plan.atrRef||plan.atrAtCreation||0,Math.abs(plan.breakoutLevel||b.close)*.002,1e-12),range=Math.max(b.high-b.low,1e-12);
+ const bodyAtr=Math.abs(b.close-b.open)/atrv,closeLocation=side===1?(b.close-b.low)/range:(b.high-b.close)/range,distanceAtr=side===1?(b.close-plan.breakoutLevel)/atrv:(plan.breakoutLevel-b.close)/atrv,vr=volumeRatioAt(cs,idx);
+ const bodyScore=clamp(bodyAtr/.90*100),locScore=clamp(closeLocation*100),distanceScore=clamp(distanceAtr/.50*100),volumeScore=clamp(vr/1.50*100),pre=Number.isFinite(plan.preBreakoutQuality)?plan.preBreakoutQuality:60;
+ let score=pre*.55+bodyScore*.12+locScore*.10+distanceScore*.10+volumeScore*.13;
+ const strong=(plan.levelStrength||0)>=policy.strongLevel;
+ if(strong&&distanceAtr<.15)score-=8;
+ score=clamp(score);
+ const threshold=policy.breakoutCloseScore+(strong?policy.strongPremium:0);
+ const evidenceOk=bodyAtr>=policy.minBodyAtr&&closeLocation>=policy.minCloseLocation&&(vr>=policy.minVolumeRatio||pre>=85);
+ const decision=score>=threshold&&evidenceOk?'CLOSE':'RETEST';
+ let reason='BREAKOUT_V2_RETEST';
+ if(decision==='CLOSE')reason='BREAKOUT_V2_MOMENTUM_CONTINUATION';
+ else if(strong)reason='BREAKOUT_V2_STRONG_LEVEL_RETEST';
+ else if(vr<policy.minVolumeRatio)reason='BREAKOUT_V2_LOW_VOLUME_RETEST';
+ else if(bodyAtr<policy.minBodyAtr||closeLocation<policy.minCloseLocation)reason='BREAKOUT_V2_WEAK_CANDLE_RETEST';
+ return{score,decision,reason,bodyAtr,closeLocation,distanceAtr,volumeRatio:vr,threshold,strongLevel:strong};
+}
 function paperLevelsPolicy(a,policy=ADAPTIVE_POLICIES.LIVE){
- const atrv=Math.max(a.atr,a.price*.002),buf=.08*atrv,retestTol=.22*atrv;
+ const atrv=Math.max(a.atr,a.price*.002),buf=.08*atrv,retestTol=.22*atrv,pre=entryQualityV2(a,policy);
  let entry,stop,tp1,tp2,mode,triggerMode,breakoutLevel,retestLow,retestHigh,entryReason;
- const highMomentum=a.momentum>=policy.momentum&&a.strength>=policy.strength&&a.volumeFlow>=policy.volume;
+ const levelStrength=a.side===1?(a.resistanceStrength||0):(a.supportStrength||0);
  if(a.side===1){
-   breakoutLevel=a.resistance;
-   const strong=(a.resistanceStrength||0)>=policy.strongLevel;
+   breakoutLevel=a.resistance;retestLow=a.resistance-retestTol;retestHigh=a.resistance+retestTol;
    if(a.price<=a.resistance+buf){
-     if(strong||!highMomentum){
-       entryReason=strong?'STRONG_LEVEL':'INSUFFICIENT_MOMENTUM_VOLUME';
-       mode=strong
-         ?'Closed-candle breakout + successful retest of strong resistance'
-         :'Closed-candle breakout + retest required (momentum/volume confirmation insufficient)';
-       triggerMode='BREAKOUT_CLOSE_RETEST';
-       retestLow=a.resistance-retestTol;retestHigh=a.resistance+retestTol;
-       entry=a.resistance+.03*atrv;
-     }else{
-       entryReason='HIGH_MOMENTUM_CONTINUATION';
-       mode='Closed-candle breakout continuation — retest not required';
-       triggerMode='BREAKOUT_CLOSE';
-       entry=a.resistance+buf;
-     }
+     entryReason='AWAIT_BREAKOUT_QUALITY_V2';
+     mode='Adaptive Entry V2 — closed-candle breakout, then choose momentum continuation or retest';
+     triggerMode='ADAPTIVE_BREAKOUT_V2';entry=a.resistance+.03*atrv;
+   }else if(pre.decision==='CLOSE_CANDIDATE'){
+     entryReason='POST_BREAKOUT_HIGH_QUALITY_V2';mode='Adaptive V2 momentum continuation after confirmed close';triggerMode='BREAKOUT_CLOSE';entry=a.price+.04*atrv;
    }else{
-     if(strong||!highMomentum){
-       entryReason=strong?'STRONG_BROKEN_LEVEL':'INSUFFICIENT_MOMENTUM_VOLUME';
-       mode=strong
-         ?'Retest of broken resistance before continuation'
-         :'Retest of broken resistance required (momentum/volume confirmation insufficient)';
-       triggerMode='RETEST_AFTER_BREAKOUT';
-       retestLow=a.resistance-retestTol;retestHigh=a.resistance+retestTol;
-       entry=a.resistance+.03*atrv;
-     }else{
-       entryReason='HIGH_MOMENTUM_CONTINUATION';
-       mode='Momentum continuation after confirmed close — retest not required';
-       triggerMode='BREAKOUT_CLOSE';
-       entry=a.price+.04*atrv;
-     }
+     entryReason='POST_BREAKOUT_RETEST_BIAS_V2';mode='Adaptive V2 retest of broken resistance before continuation';triggerMode='RETEST_AFTER_BREAKOUT';entry=a.resistance+.03*atrv;
    }
-   const structural=Math.min(a.support-.10*atrv,entry-.90*atrv);
-   let risk=entry-structural;risk=Math.max(.90*atrv,Math.min(risk,1.80*atrv));
-   stop=entry-risk;tp1=entry+1.20*risk;tp2=entry+2.00*risk;
+   const structural=Math.min(a.support-.10*atrv,entry-.90*atrv);let risk=entry-structural;risk=Math.max(.90*atrv,Math.min(risk,1.80*atrv));stop=entry-risk;tp1=entry+1.20*risk;tp2=entry+2.00*risk;
  }else{
-   breakoutLevel=a.support;
-   const strong=(a.supportStrength||0)>=policy.strongLevel;
+   breakoutLevel=a.support;retestLow=a.support-retestTol;retestHigh=a.support+retestTol;
    if(a.price>=a.support-buf){
-     if(strong||!highMomentum){
-       entryReason=strong?'STRONG_LEVEL':'INSUFFICIENT_MOMENTUM_VOLUME';
-       mode=strong
-         ?'Closed-candle breakdown + successful retest of strong support'
-         :'Closed-candle breakdown + retest required (momentum/volume confirmation insufficient)';
-       triggerMode='BREAKDOWN_CLOSE_RETEST';
-       retestLow=a.support-retestTol;retestHigh=a.support+retestTol;
-       entry=a.support-.03*atrv;
-     }else{
-       entryReason='HIGH_MOMENTUM_CONTINUATION';
-       mode='Closed-candle breakdown continuation — retest not required';
-       triggerMode='BREAKDOWN_CLOSE';
-       entry=a.support-buf;
-     }
+     entryReason='AWAIT_BREAKOUT_QUALITY_V2';
+     mode='Adaptive Entry V2 — closed-candle breakdown, then choose momentum continuation or retest';
+     triggerMode='ADAPTIVE_BREAKOUT_V2';entry=a.support-.03*atrv;
+   }else if(pre.decision==='CLOSE_CANDIDATE'){
+     entryReason='POST_BREAKOUT_HIGH_QUALITY_V2';mode='Adaptive V2 momentum continuation after confirmed close';triggerMode='BREAKDOWN_CLOSE';entry=a.price-.04*atrv;
    }else{
-     if(strong||!highMomentum){
-       entryReason=strong?'STRONG_BROKEN_LEVEL':'INSUFFICIENT_MOMENTUM_VOLUME';
-       mode=strong
-         ?'Retest of broken support before continuation'
-         :'Retest of broken support required (momentum/volume confirmation insufficient)';
-       triggerMode='RETEST_AFTER_BREAKDOWN';
-       retestLow=a.support-retestTol;retestHigh=a.support+retestTol;
-       entry=a.support-.03*atrv;
-     }else{
-       entryReason='HIGH_MOMENTUM_CONTINUATION';
-       mode='Momentum continuation after confirmed close — retest not required';
-       triggerMode='BREAKDOWN_CLOSE';
-       entry=a.price-.04*atrv;
-     }
+     entryReason='POST_BREAKOUT_RETEST_BIAS_V2';mode='Adaptive V2 retest of broken support before continuation';triggerMode='RETEST_AFTER_BREAKDOWN';entry=a.support-.03*atrv;
    }
-   const structural=Math.max(a.resistance+.10*atrv,entry+.90*atrv);
-   let risk=structural-entry;risk=Math.max(.90*atrv,Math.min(risk,1.80*atrv));
-   stop=entry+risk;tp1=entry-1.20*risk;tp2=entry-2.00*risk;
+   const structural=Math.max(a.resistance+.10*atrv,entry+.90*atrv);let risk=structural-entry;risk=Math.max(.90*atrv,Math.min(risk,1.80*atrv));stop=entry+risk;tp1=entry-1.20*risk;tp2=entry-2.00*risk;
  }
  return{entry,stop,tp1,tp2,mode,entryReason,triggerMode,breakoutLevel,retestLow,retestHigh,
    resistanceStrength:a.resistanceStrength||0,supportStrength:a.supportStrength||0,
    resistanceTouches:a.resistanceTouches||0,supportTouches:a.supportTouches||0,
-   policyName:policy.name};
+   policyName:policy.name,policyConfig:{...policy},preBreakoutQuality:pre.score,preDecision:pre.decision,
+   levelStrength,atrRef:atrv,entryModelVersion:'AdaptiveEntryV2'};
 }
 function paperLevels(a){return UnifiedDecisionEngine.paperLevels(a);}
 
@@ -444,7 +428,8 @@ function createScenarioIfNeeded(frame,cs,symbol){
    expiryBars:expiryBars(frame.tf),barCount:0,
    resistanceStrength:L.resistanceStrength,supportStrength:L.supportStrength,
    resistanceTouches:L.resistanceTouches,supportTouches:L.supportTouches,
-   integrityAtCreation:frame.integrity.score,techAtCreation:frame.a.score,atrAtCreation:frame.a.atr,
+   preBreakoutQuality:L.preBreakoutQuality,preDecision:L.preDecision,levelStrength:L.levelStrength,policyConfig:L.policyConfig,entryModelVersion:L.entryModelVersion,
+   integrityAtCreation:frame.integrity.score,techAtCreation:frame.a.score,atrAtCreation:frame.a.atr,atrRef:L.atrRef||frame.a.atr,
    primaryTrendAtCreation:primaryTrendLabel(frame.a),setupAtCreation:currentSetupLabel(frame.a),
    supportAtCreation:frame.a.support,resistanceAtCreation:frame.a.resistance
  };
@@ -538,7 +523,13 @@ function updateScenarioLifecycle(symbol,frame,cs,currentBar=null){
        fresh.breakoutConfirmedAt=b.closeTime;
        fresh.breakoutConfirmedBarTime=b.time;
        fresh.breakoutClose=b.close;
-       if(['BREAKOUT_CLOSE_RETEST','BREAKDOWN_CLOSE_RETEST'].includes(fresh.triggerMode)){
+       if(fresh.triggerMode==='ADAPTIVE_BREAKOUT_V2'){
+         const bi=cs.findIndex(x=>x.time===b.time),q=adaptiveBreakoutDecision(cs,bi,fresh.side,fresh,fresh.policyConfig||ADAPTIVE_POLICIES.LIVE);
+         fresh.adaptiveBreakoutQuality=q.score;fresh.adaptiveBreakoutDecision=q.decision;fresh.adaptiveBreakoutReason=q.reason;
+         fresh.breakoutBodyAtr=q.bodyAtr;fresh.breakoutCloseLocation=q.closeLocation;fresh.breakoutVolumeRatio=q.volumeRatio;
+         if(q.decision==='RETEST')fresh.state='WAITING_RETEST';
+         else{fresh.state='READY_NEXT_OPEN';fresh.entryConfirmationAt=b.closeTime;fresh.entryConfirmationBarTime=b.time;fresh.confirmationType='BREAKOUT_CLOSE_V2';}
+       }else if(['BREAKOUT_CLOSE_RETEST','BREAKDOWN_CLOSE_RETEST'].includes(fresh.triggerMode)){
          fresh.state='WAITING_RETEST';
        }else{
          fresh.state='READY_NEXT_OPEN';
@@ -665,7 +656,9 @@ function lifecycleCard(symbol,frame){
  <b>Original breakout/breakdown:</b> ${fmt(s.breakoutLevel,6)}<br>
  <b>Current S/R reference:</b> ${fmt(currentLevel,6)}<br>
  <b>Level drift:</b> ${fmt(driftAbs,6)} = ${fmt(driftATR,2)} ATR<br>
- <b>Why this model:</b> ${esc(s.entryReason||'Adaptive level/momentum rule')}</div>
+ <b>Pre-breakout quality:</b> ${Number.isFinite(s.preBreakoutQuality)?fmt(s.preBreakoutQuality,1)+'/100':'N/A'}<br>
+ ${Number.isFinite(s.adaptiveBreakoutQuality)?`<b>Breakout quality at confirmation:</b> ${fmt(s.adaptiveBreakoutQuality,1)}/100 • <b>V2 decision:</b> ${esc(s.adaptiveBreakoutDecision||'N/A')}<br>`:''}
+ <b>Why this model:</b> ${esc(s.adaptiveBreakoutReason||s.entryReason||'Adaptive Entry V2')}</div>
 
  ${driftATR>=1?`<div class="revalidationWarn"><b>REVALIDATION REQUIRED</b><br>المستوى الحالي ابتعد عن مستوى السيناريو الأصلي بمقدار ${fmt(driftATR,2)} ATR. لا يتم تغيير المستوى القديم بصمت؛ يبقى محفوظًا للمقارنة.</div>`:''}
 
@@ -722,8 +715,18 @@ function simulateResearchMethod(cs,sig,method,tf,costBps){
  let breakoutIndex=-1,retestIndex=-1,confirmIndex=-1,triggerKind='',noTriggerReason='';
  for(let j=i+1;j<=maxEntry;j++){const b=cs[j],ok=long?b.close>plan.breakoutLevel:b.close<plan.breakoutLevel;if(ok){breakoutIndex=j;break;}}
  if(breakoutIndex<0)return{method,triggered:false,resolved:false,noTriggerReason:'NO_BREAKOUT',barsToTrigger:null};
- const needsRetest=method==='B'||(method==='C'&&String(plan.triggerMode||'').includes('RETEST'));
- if(!needsRetest){confirmIndex=breakoutIndex;triggerKind='BREAKOUT_CLOSE';}
+ let adaptiveDecision=null,adaptiveMeta=null;
+ let needsRetest=method==='B';
+ if(method==='C'){
+   if(plan.triggerMode==='ADAPTIVE_BREAKOUT_V2'){
+     adaptiveMeta=adaptiveBreakoutDecision(cs,breakoutIndex,side,plan,plan.policyConfig||ADAPTIVE_POLICIES.LIVE);
+     adaptiveDecision=adaptiveMeta.decision;needsRetest=adaptiveDecision==='RETEST';
+   }else{
+     needsRetest=String(plan.triggerMode||'').includes('RETEST');
+     adaptiveDecision=needsRetest?'RETEST':'CLOSE';
+   }
+ }
+ if(!needsRetest){confirmIndex=breakoutIndex;triggerKind=method==='C'?'ADAPTIVE_CLOSE':'BREAKOUT_CLOSE';}
  else{
    for(let j=breakoutIndex+1;j<=maxEntry;j++){
      const b=cs[j],touch=b.low<=plan.retestHigh&&b.high>=plan.retestLow,holdLevel=long?b.close>plan.breakoutLevel:b.close<plan.breakoutLevel,failed=long?b.close<plan.stop:b.close>plan.stop;
@@ -734,13 +737,13 @@ function simulateResearchMethod(cs,sig,method,tf,costBps){
      if(!noTriggerReason)noTriggerReason='NO_RETEST';
      const after=cs.slice(breakoutIndex+1,Math.min(maxEntry+1,cs.length)),atrv=Math.max(sig.a.atr,sig.a.price*.002);
      const continuation=after.some(b=>long?b.high>=cs[breakoutIndex].close+atrv:b.low<=cs[breakoutIndex].close-atrv);
-     return{method,triggered:false,resolved:false,noTriggerReason,breakoutIndex,retestIndex:-1,missedContinuation:continuation,barsToTrigger:null};
+     return{method,triggered:false,resolved:false,noTriggerReason,breakoutIndex,retestIndex:-1,missedContinuation:continuation,barsToTrigger:null,adaptiveDecision,adaptiveMeta};
    }
  }
  const exec=nextBarOpenExecution(cs,confirmIndex,side,plan);
  if(!exec)return{method,triggered:false,resolved:false,noTriggerReason:'INVALID_NEXT_OPEN',breakoutIndex,retestIndex,confirmIndex,barsToTrigger:null};
  const result=resolveResearchTrade(cs,exec,side,costBps,hold);
- return{method,...result,breakoutIndex,retestIndex,confirmIndex,execIndex:exec.execIndex,actualEntry:exec.actualEntry,effectiveStop:exec.effectiveStop,effectiveTP1:exec.effectiveTP1,effectiveTP2:exec.effectiveTP2,triggerKind,barsToTrigger:exec.execIndex-i};
+ return{method,...result,breakoutIndex,retestIndex,confirmIndex,execIndex:exec.execIndex,actualEntry:exec.actualEntry,effectiveStop:exec.effectiveStop,effectiveTP1:exec.effectiveTP1,effectiveTP2:exec.effectiveTP2,triggerKind,barsToTrigger:exec.execIndex-i,adaptiveDecision,adaptiveMeta};
 }
 function maxDrawdownR(rows){
  let eq=0,peak=0,maxdd=0;
@@ -789,12 +792,28 @@ function fullMtfStartIndex(sets,tf){return UnifiedDecisionEngine.fullStartIndex(
 
 
 function adaptiveReasonCounts(plans){
- const out={STRONG_LEVEL:0,STRONG_BROKEN_LEVEL:0,INSUFFICIENT_MOMENTUM_VOLUME:0,HIGH_MOMENTUM_CONTINUATION:0,OTHER:0};
- for(const p of plans){
-   const k=p.entryReason||'OTHER';
-   if(out[k]===undefined)out.OTHER++;else out[k]++;
- }
+ const out={AWAIT_BREAKOUT_QUALITY_V2:0,POST_BREAKOUT_HIGH_QUALITY_V2:0,POST_BREAKOUT_RETEST_BIAS_V2:0,OTHER:0};
+ for(const p of plans){const k=p.entryReason||'OTHER';if(out[k]===undefined)out.OTHER++;else out[k]++;}
  return out;
+}
+function adaptiveOutcomeCounts(rows){
+ const out={CLOSE:0,RETEST:0,UNKNOWN:0};
+ for(const r of rows){const k=r.adaptiveDecision||'UNKNOWN';if(out[k]===undefined)out.UNKNOWN++;else out[k]++;}
+ return out;
+}
+function researchRegimeBucket(a){
+ const side=a.side||0,dm=dirValue(a.momentum,side||1),level=side===1?(a.resistanceStrength||0):(a.supportStrength||0),vr=a.volumeRatio||1;
+ if(a.regime==='Ranging')return'Ranging';
+ if(a.regime==='Trending'&&dm>=70&&vr>=1.05)return'Trending + high momentum';
+ if(a.regime==='Trending'&&vr<.85)return'Trending + low participation';
+ if(level>=80)return'Strong S/R level';
+ if(a.regime==='Trending')return'Trending — other';
+ return'Mixed / transition';
+}
+function regimeConditionedResearch(records){
+ const map=new Map();
+ for(const r of records){const k=researchRegimeBucket(r.snapshotA);if(!map.has(k))map.set(k,[]);map.get(k).push(r);}
+ return[...map.entries()].map(([name,rs])=>({name,signals:rs.length,A:aggregateResearch(rs.map(x=>x.A)),B:aggregateResearch(rs.map(x=>x.B)),C:aggregateResearch(rs.map(x=>x.C))})).sort((a,b)=>b.signals-a.signals);
 }
 function runAdaptiveProfile(records,cs,tf,costBps,policy){
  const rows=[],plans=[];
@@ -810,8 +829,9 @@ function runAdaptiveProfile(records,cs,tf,costBps,policy){
    name:policy.name,policy,
    stats:aggregateResearch(rows),
    folds:researchFoldStats(rows),
-   retestCount:plans.filter(p=>String(p.triggerMode).includes('RETEST')).length,
-   closeCount:plans.filter(p=>!String(p.triggerMode).includes('RETEST')).length,
+   retestCount:adaptiveOutcomeCounts(rows).RETEST,
+   closeCount:adaptiveOutcomeCounts(rows).CLOSE,
+   unknownCount:adaptiveOutcomeCounts(rows).UNKNOWN,
    reasons:adaptiveReasonCounts(plans)
  };
 }
@@ -852,10 +872,12 @@ function buildHistoricalResearch(sets,tf,costBps){
    B:{stats:aggregateResearch(rowsB),folds:researchFoldStats(rowsB)},
    C:{stats:aggregateResearch(rowsC),folds:researchFoldStats(rowsC)},
    paired:pairedResearchStats(records),
-   adaptiveRetestCount:records.filter(r=>String(r.plan.triggerMode).includes('RETEST')).length,
-   adaptiveCloseCount:records.filter(r=>!String(r.plan.triggerMode).includes('RETEST')).length,
+   adaptiveRetestCount:adaptiveOutcomeCounts(rowsC).RETEST,
+   adaptiveCloseCount:adaptiveOutcomeCounts(rowsC).CLOSE,
+   adaptiveUnknownCount:adaptiveOutcomeCounts(rowsC).UNKNOWN,
    adaptiveReasons:adaptiveReasonCounts(records.map(r=>r.plan)),
-   profileTests
+   profileTests,
+   regimeStats:regimeConditionedResearch(records)
  };
 }
 function researchMetric(label,value,cls=''){return`<div class="methodMetric"><small>${label}</small><b class="${cls}">${value}</b></div>`;}
@@ -863,7 +885,7 @@ function metricClassPositive(x,neutral=0){return x>neutral?'researchGood':x<neut
 function renderResearchResult(symbol,tf,costBps,result,historyN){
  if(typeof metric!=='function'||typeof displayPF!=='function'||typeof researchMetric!=='function')
    throw new Error('Research UI helper initialization failed: metric/displayPF/researchMetric');
- for(const id of['researchSummary','researchCompare','researchPairs','researchAdaptive','researchFolds','researchLifecycle'])$(id).classList.remove('hidden');
+ for(const id of['researchSummary','researchCompare','researchPairs','researchAdaptive','researchRegimes','researchFolds','researchLifecycle'])$(id).classList.remove('hidden');
  const overlapStart=result.effectiveOverlapStart?new Date(result.effectiveOverlapStart).toLocaleDateString('en-CA'):'N/A';
  const overlapEnd=result.effectiveOverlapEnd?new Date(result.effectiveOverlapEnd).toLocaleDateString('en-CA'):'N/A';
  $('researchSummary').innerHTML=`<h2>Historical Entry Research — ${esc(symbol)} ${tf}</h2><span class="parityBadge">Timeframe-specific validation: ON</span><div class="metrics">
@@ -874,7 +896,8 @@ function renderResearchResult(symbol,tf,costBps,result,historyN){
  ${metric('Execution model','Next candle open')}
  ${metric('Exit benchmark','Full exit at TP1 (1.20R)')}
  ${metric('Adaptive chose Retest',result.adaptiveRetestCount)}
- ${metric('Adaptive chose Close',result.adaptiveCloseCount)}
+ ${metric('Adaptive V2 chose Close',result.adaptiveCloseCount)}
+ ${metric('Adaptive V2 chose Retest',result.adaptiveRetestCount)}
  </div><div class="overlapNote"><b>Effective MTF date range:</b> ${overlapStart} → ${overlapEnd}<br>الرقم أعلاه هو التداخل الفعلي المطلوب للفريم المختار وفق التسلسل الهرمي الجديد؛ H1 لا يحتاج M15 تاريخيًا.</div>
  <div class="researchWarning">Benchmark الخروج موحّد: خروج كامل عند TP1 = 1.20R. TP2 تشخيص فقط ولا يرفع PF. Higher‑TF veto مطبق تاريخيًا أيضًا، مع فصل دور الاتجاه عن دور توقيت الدخول.</div>`;
 
@@ -890,7 +913,7 @@ function renderResearchResult(symbol,tf,costBps,result,historyN){
  ${researchMetric('TP2 potential after TP1',pct(s.tp2Rate))}
  ${researchMetric('Ambiguous OHLC',s.ambiguous)}
  </div>${s.resolved<30?'<span class="sampleWarn">Preliminary sample N&lt;30</span>':''}</div>`;}).join('')}</div>
- <div class="compareTableWrap"><table class="compareTable"><thead><tr><th>Metric</th><th>A: Breakout Close</th><th>B: Breakout + Retest</th><th>C: Adaptive Live Rule</th></tr></thead><tbody>
+ <div class="compareTableWrap"><table class="compareTable"><thead><tr><th>Metric</th><th>A: Breakout Close</th><th>B: Breakout + Retest</th><th>C: Adaptive Entry V2</th></tr></thead><tbody>
  ${[
  ['PF after costs',displayPF(result.A.stats.pf,result.A.stats.resolved),displayPF(result.B.stats.pf,result.B.stats.resolved),displayPF(result.C.stats.pf,result.C.stats.resolved)],
  ['Average net R',result.A.stats.avgR.toFixed(3)+'R',result.B.stats.avgR.toFixed(3)+'R',result.C.stats.avgR.toFixed(3)+'R'],
@@ -910,17 +933,20 @@ function renderResearchResult(symbol,tf,costBps,result,historyN){
  <div class="pairedBox"><small>Both triggered: Retest changed gain → loss</small><b>${q.retestWorsened}</b></div>
  </div><p class="muted">هذه مقارنة وصفية لنفس الإشارات، وليست اختيارًا تلقائيًا لطريقة دخول.</p>`;
 
- const r=result.adaptiveReasons||{};
- $('researchAdaptive').innerHTML=`<h2>Adaptive Decision Diagnostics</h2>
+ const r=result.adaptiveReasons||{},totalAdaptive=Math.max(1,result.adaptiveCloseCount+result.adaptiveRetestCount),closeShare=result.adaptiveCloseCount/totalAdaptive,retestShare=result.adaptiveRetestCount/totalAdaptive,imbalanced=Math.max(closeShare,retestShare)>.90;
+ $('researchAdaptive').innerHTML=`<h2>Adaptive Entry V2 Diagnostics</h2>
  <div class="metrics">
-   ${metric('Strong level → Retest',(r.STRONG_LEVEL||0)+(r.STRONG_BROKEN_LEVEL||0))}
-   ${metric('Weak momentum/volume → Retest',r.INSUFFICIENT_MOMENTUM_VOLUME||0)}
-   ${metric('High momentum → Close',r.HIGH_MOMENTUM_CONTINUATION||0)}
+   ${metric('V2 → Breakout Close',result.adaptiveCloseCount)}
+   ${metric('V2 → Retest',result.adaptiveRetestCount)}
+   ${metric('Close share',pct(closeShare))}
+   ${metric('Retest share',pct(retestShare))}
+   ${metric('Await breakout quality',r.AWAIT_BREAKOUT_QUALITY_V2||0)}
  </div>
- <p class="muted">لا يتم تعديل Live rule تلقائيًا. أدناه ثلاثة Profiles ثابتة للبحث فقط، حتى نرى هل القاعدة الحالية Retest-heavy دون overfitting.</p>
+ <div class="${imbalanced?'researchWarning':'overlapNote'}"><b>${imbalanced?'IMBALANCE FLAG':'Decision balance acceptable'}</b><br>${imbalanced?'إحدى طريقتي الدخول تجاوزت 90% من قرارات V2؛ لا يتم اعتبار ذلك تفوقًا بل إشارة لمزيد من الاختبار.':'لم تعد القاعدة تجبر Strong S/R على Retest تلقائيًا؛ القرار النهائي يُحسم بعد رؤية إغلاق شمعة الاختراق.'}</div>
+ <p class="muted">Adaptive V2 لا ينظر إلى قوة المستوى فقط. بعد إغلاق الاختراق يقيس Body/ATR وموضع الإغلاق داخل الشمعة والمسافة بعد المستوى وVolume ratio، ثم يختار Continuation أو Retest. الحدود ثابتة مسبقًا وليست مُحسّنة آليًا على نتيجة ADA.</p>
  <div class="profileGrid">${result.profileTests.map(z=>`<div class="profileCard">
    <h3>${esc(z.name)}</h3>
-   <div class="profileRule">Strong ≥${z.policy.strongLevel} • Momentum ≥${z.policy.momentum} • ADX/Strength ≥${z.policy.strength} • Volume ≥${z.policy.volume}</div>
+   <div class="profileRule">Close score ≥${z.policy.breakoutCloseScore} • Body/ATR ≥${z.policy.minBodyAtr.toFixed(2)} • Close-location ≥${z.policy.minCloseLocation.toFixed(2)} • Volume ≥${z.policy.minVolumeRatio.toFixed(2)}x</div>
    <div class="profileMetrics">
      ${researchMetric('Retest',z.retestCount)}
      ${researchMetric('Close',z.closeCount)}
@@ -931,6 +957,8 @@ function renderResearchResult(symbol,tf,costBps,result,historyN){
    </div>
    ${z.stats.resolved<30?'<span class="sampleWarn">Research only • small sample</span>':''}
  </div>`).join('')}</div>`;
+
+ $('researchRegimes').innerHTML=`<h2>Regime-Conditioned Entry Research</h2><p class="muted">مقارنة وصفية لطريقة الدخول داخل حالات سوق مختلفة. لا يتم اختيار "الفائز" تلقائيًا، والصفوف الصغيرة تبقى استكشافية.</p><div class="compareTableWrap"><table class="compareTable"><thead><tr><th>Regime</th><th>Signals</th><th>A PF</th><th>B PF</th><th>C PF</th><th>A AvgR</th><th>B AvgR</th><th>C AvgR</th></tr></thead><tbody>${result.regimeStats.map(z=>`<tr><td>${esc(z.name)}${z.signals<30?' • small N':''}</td><td>${z.signals}</td><td>${displayPF(z.A.pf,z.A.resolved)}</td><td>${displayPF(z.B.pf,z.B.resolved)}</td><td>${displayPF(z.C.pf,z.C.resolved)}</td><td>${z.A.avgR.toFixed(3)}R</td><td>${z.B.avgR.toFixed(3)}R</td><td>${z.C.avgR.toFixed(3)}R</td></tr>`).join('')}</tbody></table></div>`;
 
  $('researchFolds').innerHTML=`<h2>Chronological Fold Stability</h2>${methods.map(m=>`<div class="foldMethod"><h3>${researchMethodName(m)}</h3><div class="foldGrid">${result[m].folds.map(z=>{
    if(z.n<10)return`<div class="foldBox"><small>Fold ${z.fold}</small><b>INSUFFICIENT SAMPLE</b><small>N ${z.n}</small></div>`;
@@ -946,7 +974,7 @@ function renderResearchResult(symbol,tf,costBps,result,historyN){
 async function runHistoricalResearch(){
  const b=$('runResearchBtn');b.disabled=true;
  const symbol=$('researchSymbol').value.trim().toUpperCase(),market=$('researchMarket').value,tf=$('researchTf').value,costBps=+$('researchCostBps').value;
- if(tf==='D1'){ $('researchStatus').textContent='D1 Research معطّل في V5.6.7.3 حتى يتوفر مسار بيانات أعمق مناسب للمتصفح.';b.disabled=false;return; }
+ if(tf==='D1'){ $('researchStatus').textContent='D1 Research معطّل في V5.6.7.4 حتى يتوفر مسار بيانات أعمق مناسب للمتصفح.';b.disabled=false;return; }
  $('researchStatus').textContent='جاري جلب تاريخ MTF متداخل فعليًا...';
  try{
    const needs=tf==='H1'
@@ -959,12 +987,12 @@ async function runHistoricalResearch(){
    ]);
    const sets={M15:m15,H1:h1,D1:d1};
    if(sets[tf].length<500)throw new Error('عدد الشموع المتاحة غير كافٍ للاختبار التاريخي.');
-   $('researchStatus').textContent='جاري محاكاة A/B/C + Adaptive profiles مع Historical MTF parity...';
+   $('researchStatus').textContent='جاري محاكاة A/B/C + Adaptive Entry V2 + Regime-conditioned research...';
    await new Promise(r=>setTimeout(r,40));
    const result=buildHistoricalResearch(sets,tf,costBps);
    if(!result.records.length)throw new Error('لم يتم العثور على إشارات كاملة بعد تطبيق MTF + Higher‑TF veto.');
    renderResearchResult(symbol,tf,costBps,result,sets[tf].length);
-   $('researchStatus').textContent=`اكتمل V5.6.7.3 — ${result.records.length} إشارة بعد MTF parity + veto.`;
+   $('researchStatus').textContent=`اكتمل V5.6.7.4 — ${result.records.length} إشارة بعد MTF parity + veto.`;
  }catch(e){$('researchStatus').textContent='خطأ في Historical Simulator: '+e.message;}
  finally{b.disabled=false;}
 }
@@ -1007,7 +1035,7 @@ $('runLiveBtn').onclick=async()=>{
    // UI helper self-check: fail with a precise message instead of a blank dashboard.
    if(typeof metric!=='function'||typeof statusClass!=='function'||typeof displayPF!=='function')throw new Error('UI helper initialization failed: metric/statusClass/displayPF');
    currentTf='H1';renderLive();
-   $('status').textContent='اكتمل V5.6.7.3: two-pass MTF + correct Higher‑TF veto + MTF-aware OOS.';
+   $('status').textContent='اكتمل V5.6.7.4: two-pass MTF + correct Higher‑TF veto + MTF-aware OOS.';
  }catch(e){$('status').textContent='خطأ: '+e.message;}
  finally{b.disabled=false;}
 };
@@ -1110,13 +1138,13 @@ function renderTf(){
    $('tfScenario').innerHTML=`<h2>${f.tf} — Paper Reference Scenario</h2>
      <div class="decision block">BLOCKED — NEAR-QUALIFIED</div><span class="referenceBadge">REFERENCE ONLY • NOT QUALIFIED</span>
      <div class="levels4"><div class="level"><small>Paper Reference Entry</small><strong>${fmt(L.entry,6)}</strong></div><div class="level"><small>Paper Reference Stop</small><strong>${fmt(L.stop,6)}</strong></div><div class="level"><small>Paper Reference TP1</small><strong>${fmt(L.tp1,6)}</strong><div class="rankTag">R:R ${rr1.toFixed(2)}</div></div><div class="level"><small>Paper Reference TP2</small><strong>${fmt(L.tp2,6)}</strong><div class="rankTag">R:R ${rr2.toFixed(2)}</div></div></div>
-     <div class="referenceScenario"><b>Entry model:</b> ${esc(L.mode)}<br><b>Why this model:</b> ${esc(L.entryReason||'Adaptive rule')}<br>
+     <div class="referenceScenario"><b>Entry model:</b> ${esc(L.mode)}<br><b>Why this model:</b> ${esc(L.entryReason||'Adaptive Entry V2')}<br><b>Pre-breakout quality:</b> ${Number.isFinite(L.preBreakoutQuality)?fmt(L.preBreakoutQuality,1)+'/100':'N/A'}<br>
      ${L.triggerMode.includes('RETEST')?`<b>Retest zone:</b> ${fmt(L.retestLow,6)} – ${fmt(L.retestHigh,6)}<br>`:''}
      <b>Level strength:</b> ${a.side===1?fmt(L.resistanceStrength,0):fmt(L.supportStrength,0)}/100 • touches ${a.side===1?L.resistanceTouches:L.supportTouches}<br>
      <span class="muted">المستويات محسوبة من آخر شمعة مغلقة + S/R + ATR. للمستويات القوية يفضّل النظام إغلاق الاختراق ثم Retest ناجح بدل مجرد لمس السعر فوق/تحت المستوى.</span></div>`;
  }else{
    const L=f.levels,risk=Math.abs(L.entry-L.stop),rr1=risk?Math.abs(L.tp1-L.entry)/risk:0,rr2=risk?Math.abs(L.tp2-L.entry)/risk:0;
-   $('tfScenario').innerHTML=`<h2>${f.tf} — Paper Scenario</h2><div class="decision allow">${d.status}</div><div class="levels4"><div class="level"><small>Paper Entry</small><strong>${fmt(L.entry,6)}</strong></div><div class="level"><small>Paper Stop</small><strong>${fmt(L.stop,6)}</strong></div><div class="level"><small>Paper TP1</small><strong>${fmt(L.tp1,6)}</strong><div class="rankTag">R:R ${rr1.toFixed(2)}</div></div><div class="level"><small>Paper TP2</small><strong>${fmt(L.tp2,6)}</strong><div class="rankTag">R:R ${rr2.toFixed(2)}</div></div></div><div class="referenceScenario"><b>Entry model:</b> ${esc(L.mode)}<br><b>Why this model:</b> ${esc(L.entryReason||'Adaptive rule')}<br>${L.triggerMode.includes('RETEST')?`<b>Retest zone:</b> ${fmt(L.retestLow,6)} – ${fmt(L.retestHigh,6)}<br>`:''}<span class="muted">Paper Research only.</span></div>`;
+   $('tfScenario').innerHTML=`<h2>${f.tf} — Paper Scenario</h2><div class="decision allow">${d.status}</div><div class="levels4"><div class="level"><small>Paper Entry</small><strong>${fmt(L.entry,6)}</strong></div><div class="level"><small>Paper Stop</small><strong>${fmt(L.stop,6)}</strong></div><div class="level"><small>Paper TP1</small><strong>${fmt(L.tp1,6)}</strong><div class="rankTag">R:R ${rr1.toFixed(2)}</div></div><div class="level"><small>Paper TP2</small><strong>${fmt(L.tp2,6)}</strong><div class="rankTag">R:R ${rr2.toFixed(2)}</div></div></div><div class="referenceScenario"><b>Entry model:</b> ${esc(L.mode)}<br><b>Why this model:</b> ${esc(L.entryReason||'Adaptive Entry V2')}<br><b>Pre-breakout quality:</b> ${Number.isFinite(L.preBreakoutQuality)?fmt(L.preBreakoutQuality,1)+'/100':'N/A'}<br>${L.triggerMode.includes('RETEST')?`<b>Retest zone:</b> ${fmt(L.retestLow,6)} – ${fmt(L.retestHigh,6)}<br>`:''}<span class="muted">Paper Research only.</span></div>`;
  }
 
  $('tfIndicators').innerHTML=`<h2>Indicator Detail</h2><div class="metrics">

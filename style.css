@@ -207,5 +207,5 @@ table{width:100%;border-collapse:collapse;min-width:760px}th,td{padding:9px 8px;
 .overlapNote{margin-top:9px;padding:9px;border:1px solid #2c4568;background:#0c1a2e;border-radius:11px;line-height:1.65;color:#c7d5ed}
 @media(max-width:900px){.profileGrid{grid-template-columns:1fr}}
 
-/* V5.6.7.3 */
+/* V5.6.7.4 */
 .unifiedNote{padding:10px 12px;border:1px solid #2f5f78;border-radius:12px;background:#0b1d2e;color:#cfe8f2;line-height:1.7}
