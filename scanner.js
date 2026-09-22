@@ -39,7 +39,7 @@ const FALLBACK_LARGE=['BTC','ETH','BNB','XRP','SOL','DOGE','ADA','TRX','AVAX','L
 const leveragedRe=/(UP|DOWN|BULL|BEAR|3L|3S)$/i;
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
-  const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.4',{updateViaCache:'none'});
+  const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.5',{updateViaCache:'none'});
   await reg.update();
 }catch(e){console.warn(e);}});
 
@@ -397,11 +397,20 @@ function rejectReason(x,cfg){
  const a=[];
  if(x.side===1&&x.verified<cfg.bullMin)a.push('Technical<'+cfg.bullMin);
  if(x.side===-1&&x.verified>cfg.bearMax)a.push('Technical>'+cfg.bearMax);
- if(x.validation.resolved<cfg.minResolved)a.push(`OOS sample ${x.validation.resolved}<${cfg.minResolved}`);
- if(x.validation.acc<cfg.minAcc)a.push('OOS accuracy');
- if(x.validation.pf<cfg.minPF)a.push('PF');
- if(x.validation.wilson95<cfg.minWilson)a.push(`Wilson95 ${(x.validation.wilson95*100).toFixed(1)}%`);
+ if(x.validation.resolved<cfg.minResolved)a.push(`Directional OOS N ${x.validation.resolved}<${cfg.minResolved}`);
+ if(x.validation.acc<cfg.minAcc)a.push('Directional OOS accuracy');
+ if(x.validation.pf<cfg.minPF)a.push('Directional PF');
+ if(x.validation.wilson95<cfg.minWilson)a.push(`Directional Wilson95 ${(x.validation.wilson95*100).toFixed(1)}%`);
  if(!x.higherPass)a.push('Higher-TF veto');
+ if(!x.execution?.available)a.push('Execution validation unavailable');
+ else{
+   if(x.execution.stats.resolved<x.execution.needN)a.push(`Execution N ${x.execution.stats.resolved}<${x.execution.needN}`);
+   if(x.execution.stats.pf<1.10)a.push(`Execution PF ${displayPF(x.execution.stats.pf)}`);
+   if(x.execution.stats.avgR<=0)a.push(`Execution AvgR ${x.execution.stats.avgR.toFixed(3)}R`);
+   if(x.execution.stats.wilson<.40)a.push(`Execution Wilson95 ${(x.execution.stats.wilson*100).toFixed(1)}%`);
+   if(!x.execution.foldPass)a.push(`Execution folds ${x.execution.profitableFolds}/${x.execution.eligibleFolds}`);
+   if(x.execution.regimeState==='SKIP_SETUP')a.push(`Regime SKIP: ${x.execution.currentRegime}`);
+ }
  if(x.integrity.score<cfg.minIntegrity)a.push('Integrity');
  if(x.integrity.coverage<cfg.minCoverage)a.push('Integrity coverage');
  if(!x.integrity.depth.available||(x.integrity.depth.total<cfg.minDepth&&x.integrity.depth.depthToVolume<.0015))a.push('Thin depth');
@@ -415,8 +424,8 @@ function finalDecisionCards(rows,side,cfg){
  return rows.map(x=>{
    const rr1=Math.abs((x.levels.tp1-x.levels.entry)/(x.levels.entry-x.levels.stop));
    const rr2=Math.abs((x.levels.tp2-x.levels.entry)/(x.levels.entry-x.levels.stop));
-   const conf=x.validation.confidence||sampleConfidence(x.validation);
-   const sideText=side===1?'BULLISH — LIVE ENGINE PASS':'BEARISH — LIVE ENGINE PASS';
+   const conf=x.validation.confidence||sampleConfidence(x.validation),e=x.execution;
+   const sideText=side===1?'BULLISH — UNIFIED EXECUTION PASS':'BEARISH — UNIFIED EXECUTION PASS';
    const sideClass=side===1?'bullFinal':'bearFinal';
    const pillClass=side===1?'bullPill':'bearPill';
    return `<article class="finalDecisionCard ${sideClass}">
@@ -437,7 +446,12 @@ function finalDecisionCards(rows,side,cfg){
        <div class="decisionStat"><small>OOS Accuracy</small><b>${(x.validation.acc*100).toFixed(1)}%</b></div>
        <div class="decisionStat"><small>Resolved N</small><b>${x.validation.resolved}</b></div>
        <div class="decisionStat"><small>Wilson 95% LB</small><b>${(x.validation.wilson95*100).toFixed(1)}%</b></div>
-       <div class="decisionStat"><small>Profit Factor</small><b>${displayPF(x.validation.pf)}</b></div>
+       <div class="decisionStat"><small>Directional PF</small><b>${displayPF(x.validation.pf)}</b></div>
+       <div class="decisionStat"><small>Execution PF</small><b class="${e.stats.pf>=1.10?'good':'bad'}">${displayPF(e.stats.pf)}</b></div>
+       <div class="decisionStat"><small>Execution N</small><b>${e.stats.resolved}</b></div>
+       <div class="decisionStat"><small>Execution Avg R</small><b class="${e.stats.avgR>0?'good':'bad'}">${e.stats.avgR.toFixed(3)}R</b></div>
+       <div class="decisionStat"><small>Exec robustness</small><b class="${e.hardPass?'good':'bad'}">${esc(e.robustness)}</b></div>
+       <div class="decisionStat"><small>Current regime</small><b>${esc(e.currentRegime||'N/A')} • ${esc(e.regimeState)}</b></div>
        <div class="decisionStat"><small>MTF</small><b>${x.mtf.toFixed(1)}</b></div>
        <div class="decisionStat"><small>Higher TF</small><b class="${x.higherPass?'good':'bad'}">${x.higherPass?'PASS':'VETO'}</b></div>
      </div>
@@ -447,7 +461,7 @@ function finalDecisionCards(rows,side,cfg){
        <div class="paperLevel"><small>Paper TP1</small><strong>${priceFmt(x.levels.tp1)}</strong><div class="rankTag">R:R ${rr1.toFixed(2)}</div></div>
        <div class="paperLevel"><small>Paper TP2</small><strong>${priceFmt(x.levels.tp2)}</strong><div class="rankTag">R:R ${rr2.toFixed(2)}</div></div>
      </div>
-     <div class="liveGuard">Technical direction and Paper levels stay fixed until the next ${esc(cfg.tf)} candle closes. Live Integrity may only PAUSE/BLOCK the candidate.</div>
+     <div class="liveGuard">Technical direction and Paper levels stay fixed until the next ${esc(cfg.tf)} candle closes. Qualification also requires the Adaptive Entry execution gate; Live Integrity may only PAUSE/BLOCK the candidate.</div>
      <div class="ruleLine">Unified Engine • ${esc(x.market||cfg.market)} • ${esc(x.validationMode||'')}<br>M15 ${x.mtfScores.m15.toFixed(1)} • H1 ${x.mtfScores.h1.toFixed(1)} • D1 ${x.mtfScores.d1.toFixed(1)} • OOS overlap ${x.overlapN||0} • Depth ${x.integrity.depth.available?usd(x.integrity.depth.total):'N/A'}</div>
    </article>`;
  }).join('');
@@ -456,7 +470,7 @@ function finalDecisionCards(rows,side,cfg){
 function resultsTable(rows,side){
  if(!rows.length)return`<div class="note warn">لا توجد عملات اجتازت جميع شروط Technical + OOS + Integrity الآن. عدم وجود نتيجة أفضل من فرض فرصة ضعيفة.</div>`;
  return`<table class="scanTable integrityTable"><thead><tr>
- <th>Coin</th><th>Technical Score</th><th>Integrity</th><th>Risk</th><th>OOS</th><th>PF</th><th>MTF</th>
+ <th>Coin</th><th>Technical Score</th><th>Integrity</th><th>Risk</th><th>Directional OOS</th><th>Directional PF</th><th>Execution PF</th><th>Exec AvgR</th><th>Regime Gate</th><th>MTF</th>
  <th>Depth ±0.5%</th><th>Sources</th><th>Market Cap</th><th>24h Volume</th><th>Spread</th>
  <th>Paper Entry</th><th>TP1</th><th>TP2</th><th>Stop</th><th></th>
  </tr></thead><tbody>${rows.map(x=>`<tr>
@@ -466,6 +480,7 @@ function resultsTable(rows,side){
  <td class="${riskClass(x.integrity.risk)}">${x.integrity.risk.toFixed(1)}</td>
  <td>${(x.validation.acc*100).toFixed(1)}% <span class="rankTag">(${x.validation.resolved})</span></td>
  <td>${displayPF(x.validation.pf)}</td>
+ <td>${displayPF(x.execution.stats.pf)}</td><td>${x.execution.stats.avgR.toFixed(3)}R</td><td>${esc(x.execution.regimeState)}</td>
  <td>${x.mtf.toFixed(1)} <span class="rankTag">${Math.round(x.agreement*100)}% align</span></td>
  <td>${x.integrity.depth.available?usd(x.integrity.depth.total):'N/A'}</td>
  <td>${esc(sourceText(x.integrity.cross))}</td>
@@ -509,6 +524,13 @@ function closestCards(rows,side,cfg){
    if(x.validation.resolved<cfg.minResolved)gaps.push(`N ${x.validation.resolved}<${cfg.minResolved}`);
    if(x.validation.wilson95<cfg.minWilson)gaps.push(`Wilson95 ${(x.validation.wilson95*100).toFixed(1)}%`);
    if(!x.higherPass)gaps.push('Higher-TF veto');
+   if(!x.execution?.available)gaps.push('Execution unavailable');
+   else{
+     if(x.execution.stats.pf<1.10)gaps.push(`Exec PF ${displayPF(x.execution.stats.pf)}`);
+     if(x.execution.stats.avgR<=0)gaps.push(`Exec AvgR ${x.execution.stats.avgR.toFixed(3)}R`);
+     if(!x.execution.foldPass)gaps.push('Exec fold instability');
+     if(x.execution.regimeState==='SKIP_SETUP')gaps.push(`Regime SKIP`);
+   }
    if(x.integrity.score<cfg.minIntegrity)gaps.push(`Integrity ${x.integrity.score.toFixed(1)}`);
    if(x.integrity.coverage<cfg.minCoverage)gaps.push(`Coverage ${Math.round(x.integrity.coverage*100)}%`);
    const technicalDistance=side===1?Math.max(0,cfg.bullMin-x.verified):Math.max(0,x.verified-cfg.bearMax);
@@ -519,7 +541,8 @@ function closestCards(rows,side,cfg){
    const sampleDistance=Math.max(0,cfg.minResolved-x.validation.resolved)*.25;
    const wilsonDistance=Math.max(0,cfg.minWilson-x.validation.wilson95)*100;
    const htfDistance=x.higherPass?0:15;
-   const distance=technicalDistance+accDistance+pfDistance+intDistance+covDistance+sampleDistance+wilsonDistance+htfDistance;
+   const execDistance=!x.execution?.available?25:(Math.max(0,1.10-x.execution.stats.pf)*20+Math.max(0,-x.execution.stats.avgR)*50+(x.execution.foldPass?0:10)+(x.execution.regimeState==='SKIP_SETUP'?20:0));
+   const distance=technicalDistance+accDistance+pfDistance+intDistance+covDistance+sampleDistance+wilsonDistance+htfDistance+execDistance;
    return{...x,gaps,distance};
  }).sort((a,b)=>a.distance-b.distance).slice(0,3);
 
@@ -528,7 +551,8 @@ function closestCards(rows,side,cfg){
    <div class="mobileCards">
      <div class="miniCard"><small>Integrity</small><b class="${integrityClass(x.integrity.score)}">${x.integrity.score.toFixed(1)}</b></div>
      <div class="miniCard"><small>OOS</small><b>${(x.validation.acc*100).toFixed(1)}%</b></div>
-     <div class="miniCard"><small>PF</small><b>${displayPF(x.validation.pf)}</b></div>
+     <div class="miniCard"><small>Directional PF</small><b>${displayPF(x.validation.pf)}</b></div>
+     <div class="miniCard"><small>Execution PF</small><b>${x.execution?.available?displayPF(x.execution.stats.pf):'N/A'}</b></div>
      <div class="miniCard"><small>MTF</small><b>${x.mtf.toFixed(1)}</b></div>
    </div>
    <div class="gapList">${x.gaps.length?x.gaps.map(g=>`<span class="gapTag">${esc(g)}</span>`).join(''):'<span class="passTag">Passed all — should appear in final list</span>'}</div>
@@ -537,11 +561,11 @@ function closestCards(rows,side,cfg){
 
 function nearTable(rows){
  if(!rows.length)return'<div class="muted">لا توجد بيانات تشخيصية.</div>';
- return`<table class="scanTable"><thead><tr><th>Coin</th><th>Side</th><th>Technical Score</th><th>Integrity</th><th>OOS</th><th>PF</th><th>Rejected because</th></tr></thead>
- <tbody>${rows.slice(0,16).map(x=>`<tr><td class="coinCell">${esc(x.symbol)}</td><td>${x.side===1?'Bullish':'Bearish'}</td><td>${x.verified.toFixed(1)}</td><td class="${integrityClass(x.integrity.score)}">${x.integrity.score.toFixed(1)}</td><td>${(x.validation.acc*100).toFixed(1)}%</td><td>${displayPF(x.validation.pf)}</td><td>${esc(x.reason)}</td></tr>`).join('')}</tbody></table>`;
+ return`<table class="scanTable"><thead><tr><th>Coin</th><th>Side</th><th>Technical Score</th><th>Integrity</th><th>Directional OOS</th><th>Directional PF</th><th>Execution PF</th><th>Rejected because</th></tr></thead>
+ <tbody>${rows.slice(0,16).map(x=>`<tr><td class="coinCell">${esc(x.symbol)}</td><td>${x.side===1?'Bullish':'Bearish'}</td><td>${x.verified.toFixed(1)}</td><td class="${integrityClass(x.integrity.score)}">${x.integrity.score.toFixed(1)}</td><td>${(x.validation.acc*100).toFixed(1)}%</td><td>${displayPF(x.validation.pf)}</td><td>${x.execution?.available?displayPF(x.execution.stats.pf):'N/A'}</td><td>${esc(x.reason)}</td></tr>`).join('')}</tbody></table>`;
 }
 
-window.openFull=symbol=>{const m=$('scanMarket')?.value||'futures';location.href=`./?v=5.6.7.4&symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(m)}`;};
+window.openFull=symbol=>{const m=$('scanMarket')?.value||'futures';location.href=`./?v=5.6.7.5&symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(m)}`;};
 
 $('cancelScannerBtn').onclick=()=>{scannerCancelled=true;$('status').textContent='تم طلب الإيقاف؛ سيتوقف بعد انتهاء الطلبات الجارية.';};
 
@@ -599,6 +623,7 @@ $('runScannerBtn').onclick=async()=>{
      const side=a.side;
      const pwf=UnifiedDecisionEngine.purgedWalkForward(sets,cfg.tfKey,cfg.costBps);
      const validation=scannerValidation(pwf,side);
+     const execution=UnifiedDecisionEngine.executionValidation(sets,cfg.tfKey,cfg.costBps,pwf,side,a);
      const higherPass=!UnifiedDecisionEngine.higherTfVeto(cfg.tfKey,side,finals);
      const hist=sets[cfg.tfKey];
      const unifiedX={...x,a,base:hist};
@@ -609,14 +634,14 @@ $('runScannerBtn').onclick=async()=>{
      const dirs=[finals.M15?.side,finals.H1?.side,finals.D1?.side].filter(v=>v!=null&&v!==0);
      const agreement=dirs.length?Math.abs(dirs.reduce((s,v)=>s+v,0))/dirs.length:0;
      const context=ctx[cfg.tf].score;
-     done++;progress(done,finalists.length,'Stage 3/4: Unified Engine + timeframe-specific OOS + Integrity');
-     return{...x,a,side,mtf:a.mtf,agreement,mtfScores,higherPass,context,verified,validation,integrity,levels,
+     done++;progress(done,finalists.length,'Stage 3/4: Unified Engine + Directional OOS + Adaptive Execution Gate + Integrity');
+     return{...x,a,side,mtf:a.mtf,agreement,mtfScores,higherPass,context,verified,validation,execution,integrity,levels,
        validationMode:pwf.validationMode,overlapN:pwf.overlapN,market:cfg.market};
    });
    if(scannerCancelled)throw new Error('Scan cancelled');
 
    const good=final.filter(x=>x&&!x.error);
-   const qualifies=x=>x.side!==0&&x.validation.resolved>=cfg.minResolved&&x.validation.acc>=cfg.minAcc&&x.validation.pf>=cfg.minPF&&x.validation.wilson95>=cfg.minWilson&&x.higherPass&&x.integrity.pass;
+   const qualifies=x=>x.side!==0&&x.validation.resolved>=cfg.minResolved&&x.validation.acc>=cfg.minAcc&&x.validation.pf>=cfg.minPF&&x.validation.wilson95>=cfg.minWilson&&x.higherPass&&x.execution?.hardPass&&x.integrity.pass;
    const bulls=good.filter(x=>x.side===1&&x.verified>=cfg.bullMin&&qualifies(x))
      .sort((a,b)=>b.integrity.score-a.integrity.score||b.verified-a.verified||b.validation.pf-a.validation.pf).slice(0,cfg.maxResults);
    const bears=good.filter(x=>x.side===-1&&x.verified<=cfg.bearMax&&qualifies(x))
@@ -628,17 +653,18 @@ $('runScannerBtn').onclick=async()=>{
 
    ['scannerSummary','bullishCard','bearishCard','closestGrid','integrityCard','nearMissCard'].forEach(id=>$(id).classList.remove('hidden'));
 
-   const lowIntegrity=good.filter(x=>!x.integrity.pass).length;
-   $('scannerSummary').innerHTML=`<h2>V5.6.7.4 Unified Scanner Summary</h2><div class="metrics">
+   const lowIntegrity=good.filter(x=>!x.integrity.pass).length,executionBlocked=good.filter(x=>x.side&&(!x.execution?.hardPass)).length;
+   $('scannerSummary').innerHTML=`<h2>V5.6.7.5 Unified Scanner Summary</h2><div class="metrics">
      ${metric('Market-cap source',esc(u.source))}
      ${metric('Eligible universe',candidates.length)}
      ${metric('Deep-scanned',deep.length)}
      ${metric('Integrity-tested',good.length)}
      ${metric('Integrity-blocked',lowIntegrity,'bad')}
+     ${metric('Execution-gate blocked',executionBlocked,'bad')}
      ${metric('Strong bullish',bulls.length,'good')}
      ${metric('Strong bearish',bears.length,'bad')}
      ${metric('BTC/ETH context',ctx[cfg.tf].score.toFixed(1))}
-   </div><p class="muted">Stage 1 مجرد اكتشاف. المرشح النهائي يعاد حسابه بنفس Unified Decision Engine الخاص بـLive: Closed Candle → timeframe-specific Technical/Context → Higher-TF veto → Purged OOS → Cost-adjusted PF → Wilson95، ثم يضاف Scanner Integrity Guard.</p>`;
+   </div><p class="muted">Stage 1 مجرد اكتشاف. المرشح النهائي يعاد حسابه بنفس Unified Decision Engine الخاص بـLive: Closed Candle → timeframe-specific Technical/Context → Higher-TF veto → Directional Purged OOS → Adaptive Entry Execution Validation (next-candle-open + costs + folds + regime) → Scanner Integrity Guard.</p>`;
 
    $('bullishDecisionCards').innerHTML=finalDecisionCards(bulls,1,cfg);
    $('bearishDecisionCards').innerHTML=finalDecisionCards(bears,-1,cfg);
@@ -649,7 +675,7 @@ $('runScannerBtn').onclick=async()=>{
    $('closestBearishTable').innerHTML=closestCards(near,-1,cfg);
    $('nearMissTable').innerHTML=nearTable(near);
 
-   $('status').textContent=`Stage 4/4 complete: ${bulls.length} Bullish و${bears.length} Bearish اجتازوا جميع فلاتر V5.6.2.`;
+   $('status').textContent=`Stage 4/4 complete: ${bulls.length} Bullish و${bears.length} Bearish اجتازوا Directional + Execution + Integrity gates في V5.6.7.5.`;
  }catch(e){
    $('status').textContent=e.message==='Scan cancelled'?'تم إيقاف الفحص.':'خطأ أثناء الفحص: '+e.message;
  }finally{

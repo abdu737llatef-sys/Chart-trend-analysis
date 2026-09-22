@@ -2,6 +2,7 @@
 'use strict';
 
 const mean=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:0;
+const median=a=>{if(!a.length)return 0;const b=[...a].sort((x,y)=>x-y),m=Math.floor(b.length/2);return b.length%2?b[m]:(b[m-1]+b[m])/2;};
 const clamp=(x,a=0,b=100)=>Math.max(a,Math.min(b,x));
 
 function ema(v,p){const o=Array(v.length).fill(null);if(v.length<p)return o;const k=2/(p+1);let z=mean(v.slice(0,p));o[p-1]=z;for(let i=p;i<v.length;i++){z=v[i]*k+z*(1-k);o[i]=z;}return o;}
@@ -218,23 +219,26 @@ function barrierOutcomeDetailed(cs,i,dir,atrv,h=12,costBps=10){
 }
 
 function purgedWalkForward(sets,tf,costBps=10){
- const cs=sets[tf]||[],spec=validationSpec(tf),AT=atr(cs),rows=[],fullStart=fullStartIndex(sets,tf);
+ const cs=sets[tf]||[],spec=validationSpec(tf),AT=atr(cs),rows=[],signalRows=[],fullStart=fullStartIndex(sets,tf);
  const empty={n:0,wins:0,losses:0,acc:0,pf:0,wilson:0,avgR:0};
  if(fullStart<0)return{long:{...empty},short:{...empty},folds:[],foldsLong:[],foldsShort:[],spec,testN:0,costBps,overlapN:0,validationMode:validationMode(tf)};
  for(let i=fullStart;i<cs.length-spec.horizon;i+=spec.step){
    const snap=historicalSnapshot(sets,tf,i);
    if(!snap||snap.veto||!snap.a.side||!AT[i])continue;
+   signalRows.push({i,dir:snap.a.side,a:snap.a});
    const o=barrierOutcomeDetailed(cs,i,snap.a.side,AT[i],spec.horizon,costBps);
    if(o.out==='amb'||o.out==='timeout')continue;
    rows.push({i,dir:snap.a.side,out:o.out,r:o.r});
  }
- const first=Math.max(fullStart,Math.floor(fullStart+(cs.length-fullStart)*.40)),span=Math.max(1,cs.length-first),foldSize=Math.max(1,Math.floor(span/spec.folds)),testRows=[];
- const foldRanges=[];
+ const first=Math.max(fullStart,Math.floor(fullStart+(cs.length-fullStart)*.40)),span=Math.max(1,cs.length-first),foldSize=Math.max(1,Math.floor(span/spec.folds)),testRows=[],testSignals=[];
+ const foldRanges=[],foldSignalRanges=[];
  for(let f=0;f<spec.folds;f++){
    const rawStart=first+f*foldSize,rawEnd=f===spec.folds-1?cs.length-1:first+(f+1)*foldSize-1;
    const start=rawStart+spec.purge,end=rawEnd-spec.horizon;
    const fold=rows.filter(x=>x.i>=start&&x.i<=end);
+   const foldSignals=signalRows.filter(x=>x.i>=start&&x.i<=end).map(x=>({...x,fold:f,foldStart:start,foldEnd:end,foldRawEnd:rawEnd}));
    testRows.push(...fold);foldRanges.push(fold);
+   testSignals.push(...foldSignals);foldSignalRanges.push(foldSignals);
  }
  function side(dir){
    const r=testRows.filter(x=>x.dir===dir),wins=r.filter(x=>x.out==='win').length,losses=r.filter(x=>x.out==='loss').length,n=wins+losses;
@@ -253,7 +257,8 @@ function purgedWalkForward(sets,tf,costBps=10){
    overlapN:cs.length-fullStart,
    overlapStartTime:cs[fullStart]?.time||null,
    overlapEndTime:cs.at(-1)?.closeTime||null,
-   validationMode:validationMode(tf)
+   validationMode:validationMode(tf),
+   signalSamples:testSignals
  };
 }
 
@@ -295,10 +300,182 @@ function paperLevels(a,policy=LIVE_POLICY){
    resistanceTouches:a.resistanceTouches||0,supportTouches:a.supportTouches||0,policyName:policy.name,policyConfig:{...policy},preBreakoutQuality:pre.score,preDecision:pre.decision,levelStrength,atrRef:atrv,entryModelVersion:'AdaptiveEntryV2'};
 }
 
+function executionExpiryBars(tf){return tf==='M15'?16:tf==='H1'?8:5;}
+function executionHoldBars(tf){return tf==='M15'?32:tf==='H1'?24:12;}
+function executionVolumeRatioAt(cs,idx){
+ if(idx<1)return 1;
+ const from=Math.max(0,idx-20),vals=cs.slice(from,idx).map(x=>x.volume||0),m=vals.length?mean(vals):0;
+ return m>0?(cs[idx].volume||0)/m:1;
+}
+function adaptiveBreakoutDecision(cs,idx,side,plan,policy=LIVE_POLICY){
+ const b=cs[idx];
+ if(!b)return{score:0,decision:'RETEST',reason:'MISSING_BREAKOUT_BAR',bodyAtr:0,closeLocation:0,distanceAtr:0,volumeRatio:0,threshold:policy.breakoutCloseScore,strongLevel:false};
+ const atrv=Math.max(plan.atrRef||plan.atrAtCreation||0,Math.abs(plan.breakoutLevel||b.close)*.002,1e-12),range=Math.max(b.high-b.low,1e-12);
+ const bodyAtr=Math.abs(b.close-b.open)/atrv;
+ const closeLocation=side===1?(b.close-b.low)/range:(b.high-b.close)/range;
+ const distanceAtr=side===1?(b.close-plan.breakoutLevel)/atrv:(plan.breakoutLevel-b.close)/atrv;
+ const vr=executionVolumeRatioAt(cs,idx);
+ const bodyScore=clamp(bodyAtr/.90*100),locScore=clamp(closeLocation*100),distanceScore=clamp(distanceAtr/.50*100),volumeScore=clamp(vr/1.50*100),pre=Number.isFinite(plan.preBreakoutQuality)?plan.preBreakoutQuality:60;
+ let score=pre*.55+bodyScore*.12+locScore*.10+distanceScore*.10+volumeScore*.13;
+ const strong=(plan.levelStrength||0)>=policy.strongLevel;
+ if(strong&&distanceAtr<.15)score-=8;
+ score=clamp(score);
+ const threshold=policy.breakoutCloseScore+(strong?policy.strongPremium:0);
+ const evidenceOk=bodyAtr>=policy.minBodyAtr&&closeLocation>=policy.minCloseLocation&&(vr>=policy.minVolumeRatio||pre>=85);
+ const decision=score>=threshold&&evidenceOk?'CLOSE':'RETEST';
+ let reason='BREAKOUT_V2_RETEST';
+ if(decision==='CLOSE')reason='BREAKOUT_V2_MOMENTUM_CONTINUATION';
+ else if(strong)reason='BREAKOUT_V2_STRONG_LEVEL_RETEST';
+ else if(vr<policy.minVolumeRatio)reason='BREAKOUT_V2_LOW_VOLUME_RETEST';
+ else if(bodyAtr<policy.minBodyAtr||closeLocation<policy.minCloseLocation)reason='BREAKOUT_V2_WEAK_CANDLE_RETEST';
+ return{score,decision,reason,bodyAtr,closeLocation,distanceAtr,volumeRatio:vr,threshold,strongLevel:strong};
+}
+function executionEffectiveLevels(plan,actualEntry,side){
+ const stop=+plan.stop;
+ if(!Number.isFinite(actualEntry)||!Number.isFinite(stop))return null;
+ const risk=side===1?actualEntry-stop:stop-actualEntry;
+ if(!(risk>0))return null;
+ return{
+   actualEntry,effectiveStop:stop,effectiveRisk:risk,
+   effectiveTP1:side===1?actualEntry+1.20*risk:actualEntry-1.20*risk,
+   effectiveTP2:side===1?actualEntry+2.00*risk:actualEntry-2.00*risk
+ };
+}
+function executionCostR(entry,risk,costBps){
+ const riskPct=risk/Math.max(Math.abs(entry),1e-12),costPct=costBps/10000;
+ return riskPct>0?costPct/riskPct:0;
+}
+function resolveExecutionTrade(cs,exec,side,costBps,holdBars){
+ const long=side===1,entry=exec.actualEntry,stop=exec.effectiveStop,tp1=exec.effectiveTP1,risk=exec.effectiveRisk;
+ const costR=executionCostR(entry,risk,costBps),end=Math.min(cs.length-1,exec.execIndex+holdBars);
+ for(let j=exec.execIndex;j<=end;j++){
+   const b=cs[j],stopHit=long?b.low<=stop:b.high>=stop,tp1Hit=long?b.high>=tp1:b.low<=tp1;
+   if(stopHit&&tp1Hit)return{triggered:true,resolved:false,ambiguous:true,outcome:'AMBIGUOUS',r:null,exitIndex:j};
+   if(stopHit)return{triggered:true,resolved:true,ambiguous:false,outcome:'STOP',r:-(1+costR),exitIndex:j};
+   if(tp1Hit)return{triggered:true,resolved:true,ambiguous:false,outcome:'TP1',r:1.20-costR,exitIndex:j};
+ }
+ const last=cs[end],raw=(long?(last.close-entry):(entry-last.close))/Math.max(risk,1e-12);
+ return{triggered:true,resolved:true,ambiguous:false,outcome:'TIME_EXIT',r:raw-costR,exitIndex:end};
+}
+function executionRegimeBucket(a){
+ const side=a.side||0,dm=dirValueEntry(a.momentum,side||1),level=side===1?(a.resistanceStrength||0):(a.supportStrength||0),vr=a.volumeRatio||1;
+ if(a.regime==='Ranging')return'Ranging';
+ if(a.regime==='Trending'&&dm>=70&&vr>=1.05)return'Trending + high momentum';
+ if(a.regime==='Trending'&&vr<.85)return'Trending + low participation';
+ if(level>=80)return'Strong S/R level';
+ if(a.regime==='Trending')return'Trending — other';
+ return'Mixed / transition';
+}
+function simulateAdaptiveExecution(cs,sample,tf,costBps){
+ const i=sample.i,side=sample.dir,a={...sample.a,side},long=side===1,plan=paperLevels(a),expiry=executionExpiryBars(tf),hold=executionHoldBars(tf),maxEntry=Math.min(cs.length-2,i+expiry);
+ let breakoutIndex=-1,retestIndex=-1,confirmIndex=-1,adaptiveDecision=null,adaptiveMeta=null,noTriggerReason='';
+ for(let j=i+1;j<=maxEntry;j++){
+   const b=cs[j],ok=long?b.close>plan.breakoutLevel:b.close<plan.breakoutLevel;
+   if(ok){breakoutIndex=j;break;}
+ }
+ if(breakoutIndex<0)return{signalIndex:i,fold:sample.fold,side,regime:executionRegimeBucket(a),triggered:false,resolved:false,noTriggerReason:'NO_BREAKOUT'};
+ let needsRetest=String(plan.triggerMode||'').includes('RETEST');
+ if(plan.triggerMode==='ADAPTIVE_BREAKOUT_V2'){
+   adaptiveMeta=adaptiveBreakoutDecision(cs,breakoutIndex,side,plan,plan.policyConfig||LIVE_POLICY);
+   adaptiveDecision=adaptiveMeta.decision;
+   needsRetest=adaptiveDecision==='RETEST';
+ }
+ if(!needsRetest)confirmIndex=breakoutIndex;
+ else{
+   for(let j=breakoutIndex+1;j<=maxEntry;j++){
+     const b=cs[j],touch=b.low<=plan.retestHigh&&b.high>=plan.retestLow,holdLevel=long?b.close>plan.breakoutLevel:b.close<plan.breakoutLevel,failed=long?b.close<plan.stop:b.close>plan.stop;
+     if(failed){noTriggerReason='FAILED_RETEST';break;}
+     if(touch&&holdLevel){retestIndex=j;confirmIndex=j;break;}
+   }
+   if(confirmIndex<0)return{signalIndex:i,fold:sample.fold,side,regime:executionRegimeBucket(a),triggered:false,resolved:false,noTriggerReason:noTriggerReason||'NO_RETEST',adaptiveDecision,adaptiveMeta};
+ }
+ const execIndex=confirmIndex+1;
+ if(execIndex>=cs.length)return{signalIndex:i,fold:sample.fold,side,regime:executionRegimeBucket(a),triggered:false,resolved:false,noTriggerReason:'INVALID_NEXT_OPEN'};
+ const eff=executionEffectiveLevels(plan,cs[execIndex].open,side);
+ if(!eff)return{signalIndex:i,fold:sample.fold,side,regime:executionRegimeBucket(a),triggered:false,resolved:false,noTriggerReason:'INVALID_EFFECTIVE_RISK'};
+ const result=resolveExecutionTrade(cs,{execIndex,...eff},side,costBps,hold);
+ return{signalIndex:i,fold:sample.fold,side,regime:executionRegimeBucket(a),adaptiveDecision,adaptiveMeta,breakoutIndex,retestIndex,confirmIndex,execIndex,...result};
+}
+function aggregateExecution(rows){
+ const triggered=rows.filter(x=>x.triggered),resolved=triggered.filter(x=>x.resolved&&Number.isFinite(x.r)),wins=resolved.filter(x=>x.r>0),losses=resolved.filter(x=>x.r<0);
+ const grossWin=wins.reduce((s,x)=>s+x.r,0),grossLoss=Math.abs(losses.reduce((s,x)=>s+x.r,0)),pf=grossLoss?grossWin/grossLoss:(grossWin?Infinity:0);
+ let eq=0,peak=0,maxDD=0;
+ for(const x of resolved){eq+=x.r;peak=Math.max(peak,eq);maxDD=Math.max(maxDD,peak-eq);}
+ return{
+   signals:rows.length,triggered:triggered.length,triggerRate:rows.length?triggered.length/rows.length:0,resolved:resolved.length,
+   wins:wins.length,losses:losses.length,accuracy:resolved.length?wins.length/resolved.length:0,pf,
+   avgR:resolved.length?resolved.reduce((s,x)=>s+x.r,0)/resolved.length:0,
+   wilson:wilsonLower95(wins.length,resolved.length),maxDD,
+   ambiguous:triggered.filter(x=>x.ambiguous).length
+ };
+}
+function executionFoldStats(rows,folds=4){
+ const out=[];
+ for(let f=0;f<folds;f++){const st=aggregateExecution(rows.filter(x=>x.fold===f));out.push({fold:f+1,...st});}
+ return out;
+}
+function executionRegimeStats(rows){
+ const names=['Trending + high momentum','Trending + low participation','Strong S/R level','Ranging','Trending — other','Mixed / transition'];
+ return names.map(name=>({name,...aggregateExecution(rows.filter(x=>x.regime===name))})).filter(x=>x.signals>0);
+}
+function executionValidation(sets,tf,costBps=10,pwf=null,side=null,currentA=null){
+ const cs=sets[tf]||[];
+ if(!pwf)pwf=purgedWalkForward(sets,tf,costBps);
+ if(!currentA){
+   try{currentA=finalizeCurrent(sets)[tf]||null;}catch{currentA=null;}
+ }
+ side=side||currentA?.side||0;
+ const empty=aggregateExecution([]);
+ if(!side)return{available:false,pass:false,hardPass:false,robustness:'N/A',reason:'NEUTRAL_DIRECTION',stats:empty,folds:[],regimes:[],currentRegime:null,regimeStats:empty,regimeState:'N/A',hardBlockReasons:['NEUTRAL_DIRECTION']};
+ const fullWindow=executionExpiryBars(tf)+executionHoldBars(tf)+2;
+ const samples=(pwf.signalSamples||[]).filter(x=>x.dir===side&&(!Number.isFinite(x.foldRawEnd)||x.i+fullWindow<=x.foldRawEnd));
+ if(!samples.length)return{available:false,pass:false,hardPass:false,robustness:'WEAK',reason:'NO_PURGED_EXECUTION_SAMPLES',stats:empty,folds:[],regimes:[],currentRegime:currentA?executionRegimeBucket({...currentA,side}):null,regimeStats:empty,regimeState:'INSUFFICIENT_SAMPLE',hardBlockReasons:['NO_EXECUTION_SAMPLES']};
+ const rows=samples.map(x=>simulateAdaptiveExecution(cs,x,tf,costBps));
+ const stats=aggregateExecution(rows),folds=executionFoldStats(rows,pwf.spec?.folds||4),regimes=executionRegimeStats(rows);
+ const needN=validationSpec(tf).minN;
+ // This gate validates the actual Adaptive Entry V2 lifecycle, not only directional accuracy.
+ // A positive expectancy + PF above 1.10 is required after the same research cost.
+ const globalPass=stats.resolved>=needN&&stats.pf>=1.10&&stats.avgR>0&&stats.wilson>=.40;
+ const eligibleFolds=folds.filter(x=>x.resolved>=10),profitableFolds=eligibleFolds.filter(x=>x.pf>=1.0&&x.avgR>=0).length;
+ const medPF=eligibleFolds.length?median(eligibleFolds.map(x=>x.pf)):0;
+ const foldPass=eligibleFolds.length>=3&&profitableFolds>=2&&medPF>=1.0;
+ const currentRegime=currentA?executionRegimeBucket({...currentA,side}):null;
+ const regimeStats=currentRegime?aggregateExecution(rows.filter(x=>x.regime===currentRegime)):empty;
+ const regimeMinN=tf==='M15'?30:tf==='H1'?25:20;
+ let regimeState='INSUFFICIENT_SAMPLE',regimePass=false;
+ if(regimeStats.resolved>=regimeMinN){
+   if(regimeStats.pf>=1.10&&regimeStats.avgR>0){regimeState='ALLOW';regimePass=true;}
+   else if(regimeStats.pf<.95||regimeStats.avgR<=-.02)regimeState='SKIP_SETUP';
+   else regimeState='WAIT_DEVELOPING';
+ }
+ const hardBlockReasons=[];
+ if(stats.resolved<needN)hardBlockReasons.push('EXECUTION_N');
+ if(stats.pf<1.10)hardBlockReasons.push('EXECUTION_PF');
+ if(stats.avgR<=0)hardBlockReasons.push('EXECUTION_EXPECTANCY');
+ if(stats.wilson<.40)hardBlockReasons.push('EXECUTION_WILSON');
+ if(!foldPass)hardBlockReasons.push('FOLD_INSTABILITY');
+ if(regimeState==='SKIP_SETUP')hardBlockReasons.push('REGIME_SKIP');
+ // An under-sampled current regime is a caution rather than an automatic failure. This prevents
+ // a tiny regime bucket from overriding a much larger global/fold sample, while still capping confidence.
+ const hardPass=globalPass&&foldPass&&regimeState!=='SKIP_SETUP';
+ const pass=hardPass;
+ const regimeCaution=regimeState!=='ALLOW';
+ let robustness='WEAK';
+ if(hardPass)robustness=regimeCaution?'DEVELOPING':'CONFIRMED';
+ if(hardPass&&!regimeCaution&&stats.resolved>=100&&stats.pf>=1.20&&stats.avgR>=.03&&profitableFolds>=3&&medPF>=1.10&&regimeStats.pf>=1.20)robustness='STABLE';
+ return{
+   available:true,pass,hardPass,robustness,reason:hardPass?'EXECUTION_GATE_PASS':'EXECUTION_GATE_FAIL',hardBlockReasons,
+   stats,folds,regimes,currentRegime,regimeStats,regimeState,regimePass,regimeCaution,regimeMinN,
+   globalPass,foldPass,needN,eligibleFolds:eligibleFolds.length,profitableFolds,medianFoldPF:medPF,
+   costBps,side,rows
+ };
+}
+
 root.UnifiedDecisionEngine={
- version:'5.6.7.4',
+ version:'5.6.7.5',
  validationSpec,technicalCore,contextScore,finalizeOne,finalizeCurrent,higherTfVeto,
- historicalSnapshot,fullStartIndex,purgedWalkForward,validationMode,paperLevels,entryQualityV2,LIVE_POLICY,
+ historicalSnapshot,fullStartIndex,purgedWalkForward,validationMode,paperLevels,entryQualityV2,adaptiveBreakoutDecision,
+ executionValidation,executionRegimeBucket,aggregateExecution,LIVE_POLICY,
  wilsonLower95,atr,clamp,normBase
 };
 })(typeof window!=='undefined'?window:globalThis);

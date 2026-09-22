@@ -1,19 +1,23 @@
-# V5.6.7.4 — Adaptive Entry V2 + Regime-Conditioned Research
+# V5.6.7.5 — Adaptive Execution Validation Gate
 
-## ما الجديد
-- Unified Decision Engine كما في V5.6.7.3.
-- Adaptive Entry V2 لا يفرض Retest بسبب قوة S/R وحدها.
-- عند انتظار الاختراق، القرار النهائي بين Continuation وRetest يتم **بعد إغلاق شمعة الاختراق**.
-- Breakout Quality يعتمد على: Pre-breakout technical quality + Body/ATR + close location + distance beyond level + volume ratio + strong-level premium.
-- التنفيذ البحثي يبقى عند Open الشمعة التالية بعد التأكيد.
-- أضيف Regime-Conditioned Entry Research لمقارنة A/B/C داخل: Trending high momentum، Trending low participation، Strong S/R، Ranging، Mixed.
-- أضيف Imbalance Flag إذا استحوذت طريقة دخول واحدة على أكثر من 90% من قرارات Adaptive V2.
-- الحدود ثابتة مسبقًا وليست مُحسنة تلقائيًا على نتيجة عملة واحدة.
+هذا الإصدار يعالج أهم فجوة ظهرت في اختبار V5.6.7.4: **صحة الاتجاه التاريخية لا تعني أن طريقة الدخول والتنفيذ نفسها مربحة**.
 
-## A/B/C
-A = Breakout Close
-B = Breakout + Retest
-C = Adaptive Entry V2
+## الجديد
+- إضافة طبقة **Adaptive Entry Execution Validation** مشتركة بين Live MTF وMarket Scanner.
+- المحاكاة تستخدم نفس دورة Paper: تأكيد اختراق/Retest على شمعة مغلقة، ثم تنفيذ بحثي عند **Open الشمعة التالية**، مع Effective Stop وTP1 وتكلفة Round-trip.
+- تعرض Execution PF وAverage net R وWilson95 وResolved N وMax Drawdown.
+- اختبار استقرار عبر 4 Chronological/Purged folds، مع منع اعتماد نتيجة ناتجة من Fold واحد.
+- **Regime Gate** للحالة الحالية: ALLOW / WAIT_DEVELOPING / INSUFFICIENT_SAMPLE / SKIP_SETUP.
+- نقص عينة النظام السوقي لا يُعامل كدليل؛ يخفض الثقة إلى PRELIMINARY بدل إعطاء ثقة زائفة.
+- إذا كان النظام السوقي الحالي تاريخيًا ضعيفًا (`SKIP_SETUP`) يتم الحجب.
+- Scanner وLive يستخدمان نفس Execution Gate لمنع مفارقة ظهور عملة Qualified في الماسح ثم BLOCKED في Live بسبب اختلاف منطق التحقق.
+- السيناريو Paper المعلّق يتوقف في `PAUSED_VALIDATION` إذا انهارت بوابات التحقق قبل التفعيل.
 
-## ملاحظة
-كل Entry/TP/Stop ونتائج الاختبار للـPaper/Research فقط، وليست توصية تداول أو احتمال ربح مضمون.
+## مهم
+- Directional OOS ما زال موجودًا كطبقة مستقلة.
+- Execution Validation لا يستبدل Market Integrity؛ بل يسبقها.
+- جميع Entry / Stop / TP مستويات **Paper/Research فقط**.
+- لا تمثل النتائج احتمال نجاح مستقبلي أو توصية تداول حقيقي.
+
+## التثبيت على GitHub Pages
+ارفع جميع الملفات إلى جذر المستودع ثم افتح الرابط مع `?v=5.6.7.5`. إذا ظل الإصدار القديم ظاهرًا، امسح Site Data أو أزل الـPWA ثم ثبّته من جديد.

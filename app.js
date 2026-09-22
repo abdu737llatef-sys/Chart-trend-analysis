@@ -2,7 +2,7 @@ const $=id=>document.getElementById(id);
 let deferredPrompt=null,currentLive=null,currentTf='H1';
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
- const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.4',{updateViaCache:'none'});await reg.update();
+ const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.5',{updateViaCache:'none'});await reg.update();
 }catch(e){console.warn(e);}});
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('installBtn').classList.remove('hidden');});
 $('installBtn').onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('installBtn').classList.add('hidden');};
@@ -50,6 +50,7 @@ function scenarioStateClass(s){
  if(s==='TP1_HIT'||s==='TP2_HIT')return'stateWin';
  if(s==='STOPPED'||s==='INVALIDATED'||s==='AMBIGUOUS')return'stateLoss';
  if(s==='PAUSED_INTEGRITY')return'statePaused';
+ if(s==='PAUSED_VALIDATION')return'statePaused';
  if(s==='PAUSED_TECHNICAL')return'stateTechPause';
  if(s==='STALE_REVALIDATION')return'stateStale';
  return'stateEnded';
@@ -105,6 +106,8 @@ function scenarioNextAction(s){
    return `تم تسجيل Actual Paper Trigger. تتم متابعة Effective Stop / TP1 / TP2 على الشموع المغلقة.`;
  if(s.state==='PAUSED_INTEGRITY')
    return `السيناريو موقوف مؤقتًا بسبب Market Integrity؛ لا يتم إنشاء Trigger جديد حتى عودة الحد الأدنى.`;
+ if(s.state==='PAUSED_VALIDATION')
+   return `السيناريو موقوف بحثيًا لأن بوابة Historical/Execution Validation لم تعد مجتازة. يبقى محفوظًا ولا يتم إنشاء Paper Trigger جديد حتى تعود الشروط.`;
  if(s.state==='PAUSED_TECHNICAL')
    return `السيناريو محفوظ لكن Current Setup أصبح Neutral. لا يتم تفعيل اختراق جديد حتى يعود نفس الاتجاه الفني قبل انتهاء الصلاحية.`;
  if(s.state==='STALE_REVALIDATION')
@@ -159,7 +162,7 @@ function isTerminalScenarioState(s){
  return['TP2_HIT','STOPPED','INVALIDATED','EXPIRED','AMBIGUOUS'].includes(s);
 }
 function isPreTriggerScenarioState(s){
- return['PENDING_BREAKOUT','WAITING_RETEST','PAUSED_INTEGRITY','PAUSED_TECHNICAL','STALE_REVALIDATION'].includes(s);
+ return['PENDING_BREAKOUT','WAITING_RETEST','PAUSED_INTEGRITY','PAUSED_VALIDATION','PAUSED_TECHNICAL','STALE_REVALIDATION'].includes(s);
 }
 
 function mtfComponent(tf,cores){return UnifiedDecisionEngine.contextScore(tf,cores);}
@@ -387,26 +390,48 @@ function confidenceTier(hist,integrity,techScore){
  return'PRELIMINARY';
 }
 function finalDecision(frame,cfg){
- const a=frame.a,h=a.side===1?frame.oos.long:frame.oos.short,needN=requiredSample(frame.tf,cfg);
+ const a=frame.a,h=a.side===1?frame.oos.long:frame.oos.short,needN=requiredSample(frame.tf,cfg),e=frame.execution;
  const reasons=[];
  if(a.side===0)reasons.push('Current setup is neutral');
  if(frame.veto)reasons.push('Higher-timeframe veto');
- if(a.side&&h.n<needN)reasons.push(`OOS N ${h.n} < ${needN}`);
- if(a.side&&h.acc<cfg.minAcc)reasons.push(`OOS accuracy ${(h.acc*100).toFixed(1)}% < ${(cfg.minAcc*100).toFixed(0)}%`);
- if(a.side&&h.pf<cfg.minPF)reasons.push(`Cost-adjusted PF ${h.pf.toFixed(2)} < ${cfg.minPF.toFixed(2)}`);
- if(a.side&&h.wilson<cfg.minWilson)reasons.push(`Wilson95 ${(h.wilson*100).toFixed(1)}% < ${(cfg.minWilson*100).toFixed(0)}%`);
+ if(a.side&&h.n<needN)reasons.push(`Directional OOS N ${h.n} < ${needN}`);
+ if(a.side&&h.acc<cfg.minAcc)reasons.push(`Directional OOS accuracy ${(h.acc*100).toFixed(1)}% < ${(cfg.minAcc*100).toFixed(0)}%`);
+ if(a.side&&h.pf<cfg.minPF)reasons.push(`Directional cost-adjusted PF ${displayPF(h.pf,h.n)} < ${cfg.minPF.toFixed(2)}`);
+ if(a.side&&h.wilson<cfg.minWilson)reasons.push(`Directional Wilson95 ${(h.wilson*100).toFixed(1)}% < ${(cfg.minWilson*100).toFixed(0)}%`);
+
+ if(a.side){
+   if(!e?.available)reasons.push('Adaptive Entry execution validation unavailable');
+   else{
+     if(e.stats.resolved<e.needN)reasons.push(`Execution OOS N ${e.stats.resolved} < ${e.needN}`);
+     if(e.stats.pf<1.10)reasons.push(`Adaptive Entry execution PF ${displayPF(e.stats.pf,e.stats.resolved)} < 1.10`);
+     if(e.stats.avgR<=0)reasons.push(`Adaptive Entry expectancy ${e.stats.avgR.toFixed(3)}R ≤ 0`);
+     if(e.stats.wilson<.40)reasons.push(`Execution Wilson95 ${(e.stats.wilson*100).toFixed(1)}% < 40%`);
+     if(!e.foldPass)reasons.push(`Execution fold stability failed: ${e.profitableFolds}/${e.eligibleFolds} profitable folds; median PF ${displayPF(e.medianFoldPF,999)}`);
+     if(e.regimeState==='SKIP_SETUP')reasons.push(`Current regime ${e.currentRegime}: historical execution gate says SKIP`);
+   }
+ }
  if(frame.integrity.score<70)reasons.push(`Integrity ${frame.integrity.score.toFixed(1)} < 70`);
  if(frame.integrity.coverage<.50)reasons.push(`Integrity coverage ${(frame.integrity.coverage*100).toFixed(0)}% < 50%`);
  if(reasons.length)return{status:'BLOCKED',reasons,needN};
- return{status:confidenceTier(h,frame.integrity,a.score),reasons:['All minimum gates passed'],needN};
+
+ let status=confidenceTier(h,frame.integrity,a.score);
+ const notes=['Directional OOS gates passed','Adaptive Entry execution gate passed'];
+ if(e?.regimeState==='ALLOW')notes.push(`Current regime ${e.currentRegime}: ALLOW`);
+ else if(e?.regimeState){status='PRELIMINARY';notes.push(`Current regime ${e.currentRegime}: ${e.regimeState} — confidence capped`);}
+ if(e?.robustness==='DEVELOPING'&&status==='HIGH CONFIDENCE')status='CONFIRMED';
+ if(e?.robustness==='DEVELOPING'&&status==='CONFIRMED'&&e.regimeCaution)status='PRELIMINARY';
+ notes.push(`Execution robustness: ${e?.robustness||'N/A'}`);
+ return{status,reasons:notes,needN};
 }
 function nearQualified(frame,cfg){
  const a=frame.a;if(!a.side||frame.veto||frame.integrity.score<70||frame.integrity.coverage<.50)return false;
- const h=a.side===1?frame.oos.long:frame.oos.short,needN=requiredSample(frame.tf,cfg);
+ const h=a.side===1?frame.oos.long:frame.oos.short,needN=requiredSample(frame.tf,cfg),e=frame.execution;
  const gates=[h.n>=needN,h.acc>=cfg.minAcc,h.pf>=cfg.minPF,h.wilson>=cfg.minWilson];
  const passed=gates.filter(Boolean).length;
- const nClose=h.n>=Math.max(15,needN*.50),accClose=h.acc>=cfg.minAcc-.04,pfClose=h.pf>=Math.max(1,cfg.minPF-.20),wClose=h.wilson>=cfg.minWilson-.05;
- return passed>=3 || (passed>=2&&nClose&&accClose&&pfClose&&wClose);
+ const directionalClose=passed>=3 || (passed>=2&&h.n>=Math.max(15,needN*.50)&&h.acc>=cfg.minAcc-.04&&h.pf>=Math.max(1,cfg.minPF-.20)&&h.wilson>=cfg.minWilson-.05);
+ if(!directionalClose||!e?.available||e.regimeState==='SKIP_SETUP')return false;
+ const execClose=e.stats.resolved>=Math.max(20,e.needN*.50)&&e.stats.pf>=.95&&e.stats.avgR>=-.02&&e.eligibleFolds>=2;
+ return execClose;
 }
 
 
@@ -477,6 +502,16 @@ function updateScenarioLifecycle(symbol,frame,cs,currentBar=null){
    const alreadyTriggered=['TRIGGERED','TP1_HIT','READY_NEXT_OPEN'].includes(fresh.state);
 
    if(!alreadyTriggered){
+     // A previously-qualified pending scenario is frozen if validation deteriorates materially.
+     // Near-qualified reference scenarios may continue to be observed for research, but cannot be mistaken for a qualified trigger.
+     if(frame.decision?.status==='BLOCKED'&&!frame.near){
+       if(fresh.state!=='PAUSED_VALIDATION')fresh.resumeState=['PENDING_BREAKOUT','WAITING_RETEST'].includes(fresh.state)?fresh.state:(fresh.resumeState||'PENDING_BREAKOUT');
+       fresh.state='PAUSED_VALIDATION';
+       return fresh;
+     }else if(fresh.state==='PAUSED_VALIDATION'){
+       fresh.state=fresh.resumeState||'PENDING_BREAKOUT';
+     }
+
      // Neutral current setup pauses, but does not erase, the prior scenario.
      if(frame.a.side===0){
        if(fresh.state!=='PAUSED_TECHNICAL'){
@@ -974,7 +1009,7 @@ function renderResearchResult(symbol,tf,costBps,result,historyN){
 async function runHistoricalResearch(){
  const b=$('runResearchBtn');b.disabled=true;
  const symbol=$('researchSymbol').value.trim().toUpperCase(),market=$('researchMarket').value,tf=$('researchTf').value,costBps=+$('researchCostBps').value;
- if(tf==='D1'){ $('researchStatus').textContent='D1 Research معطّل في V5.6.7.4 حتى يتوفر مسار بيانات أعمق مناسب للمتصفح.';b.disabled=false;return; }
+ if(tf==='D1'){ $('researchStatus').textContent='D1 Research معطّل في V5.6.7.5 حتى يتوفر مسار بيانات أعمق مناسب للمتصفح.';b.disabled=false;return; }
  $('researchStatus').textContent='جاري جلب تاريخ MTF متداخل فعليًا...';
  try{
    const needs=tf==='H1'
@@ -992,7 +1027,7 @@ async function runHistoricalResearch(){
    const result=buildHistoricalResearch(sets,tf,costBps);
    if(!result.records.length)throw new Error('لم يتم العثور على إشارات كاملة بعد تطبيق MTF + Higher‑TF veto.');
    renderResearchResult(symbol,tf,costBps,result,sets[tf].length);
-   $('researchStatus').textContent=`اكتمل V5.6.7.4 — ${result.records.length} إشارة بعد MTF parity + veto.`;
+   $('researchStatus').textContent=`اكتمل V5.6.7.5 — ${result.records.length} إشارة بعد MTF parity + veto.`;
  }catch(e){$('researchStatus').textContent='خطأ في Historical Simulator: '+e.message;}
  finally{b.disabled=false;}
 }
@@ -1019,9 +1054,11 @@ $('runLiveBtn').onclick=async()=>{
      $('status').textContent=`${tf}: Timeframe-specific Purged Walk‑Forward + integrity...`;
      const oos=purgedWalkForwardMtf(setsByTf,tf,cfg.costBps);
      oos.folds=a.side===1?(oos.foldsLong||oos.folds):a.side===-1?(oos.foldsShort||oos.folds):oos.folds;
+     $('status').textContent=`${tf}: محاكاة Adaptive Entry V2 على عينات OOS...`;
+     const execution=UnifiedDecisionEngine.executionValidation(setsByTf,tf,cfg.costBps,oos,a.side,a);
      const integrity=await liveIntegrity(symbol,market,a.price,loaded[i]);
      const veto=higherTfVeto(tf,a.side,finals);
-     const frame={tf,a,oos,integrity,veto,levels:a.side?paperLevels(a):null,candles:loaded[i]};
+     const frame={tf,a,oos,execution,integrity,veto,levels:a.side?paperLevels(a):null,candles:loaded[i]};
      frame.decision=finalDecision(frame,cfg);frame.near=frame.decision.status==='BLOCKED'&&nearQualified(frame,cfg);
      updateScenarioLifecycle(symbol,frame,loaded[i],executionBars[i]);createScenarioIfNeeded(frame,loaded[i],symbol);
      frames.push(frame);
@@ -1035,7 +1072,7 @@ $('runLiveBtn').onclick=async()=>{
    // UI helper self-check: fail with a precise message instead of a blank dashboard.
    if(typeof metric!=='function'||typeof statusClass!=='function'||typeof displayPF!=='function')throw new Error('UI helper initialization failed: metric/statusClass/displayPF');
    currentTf='H1';renderLive();
-   $('status').textContent='اكتمل V5.6.7.4: two-pass MTF + correct Higher‑TF veto + MTF-aware OOS.';
+   $('status').textContent='اكتمل V5.6.7.5: directional OOS + Adaptive Entry execution validation + regime/fold gate + live integrity.';
  }catch(e){$('status').textContent='خطأ: '+e.message;}
  finally{b.disabled=false;}
 };
@@ -1116,8 +1153,29 @@ function renderTf(){
    <div class="overlapNote">Timeframe-specific OOS overlap: ${f.oos.overlapN||0} ${f.tf} candles${f.oos.overlapStartTime?` • ${new Date(f.oos.overlapStartTime).toLocaleDateString('en-CA')} → ${new Date(f.oos.overlapEndTime).toLocaleDateString('en-CA')}`:''}</div>
    <p class="muted">${esc(f.oos.validationMode||'Timeframe-specific validation')}<br>تم تطبيق Higher‑TF veto قبل إدخال الإشارة في OOS. هذه إحصاءات تاريخية وليست احتمالًا مضمونًا.</p>`;
 
+ const e=f.execution;
+ const regimeClass=e?.regimeState==='ALLOW'?'enginePass':e?.regimeState==='SKIP_SETUP'?'engineFail':'engineWarn';
+ $('tfExecution').innerHTML=`<h2>3 — Adaptive Entry Execution Validation</h2>
+   <p class="muted">هذه الطبقة تختبر نفس نموذج التنفيذ المستخدم في Paper Scenario: اختراق/إعادة اختبار حسب Adaptive Entry V2 → تأكيد بشمعة مغلقة → تنفيذ بحثي عند Open الشمعة التالية → Stop/TP1 فعليان بالنسبة لسعر التنفيذ → تكاليف البحث. لذلك قد ينجح Directional OOS بينما تُحجب الفكرة هنا.</p>
+   ${a.side&&e?.available?`<div class="layerGrid">
+     <div class="layerMetric"><small>Execution robustness</small><b class="${e.hardPass?'enginePass':'engineFail'}">${esc(e.robustness)}</b></div>
+     <div class="layerMetric"><small>Execution signals</small><b>${e.stats.signals}</b></div>
+     <div class="layerMetric"><small>Triggered</small><b>${e.stats.triggered} • ${pct(e.stats.triggerRate)}</b></div>
+     <div class="layerMetric"><small>Resolved execution N</small><b class="${e.stats.resolved>=e.needN?'enginePass':'engineFail'}">${e.stats.resolved} / ${e.needN}</b></div>
+     <div class="layerMetric"><small>Execution PF after costs</small><b class="${e.stats.pf>=1.10?'enginePass':'engineFail'}">${displayPF(e.stats.pf,e.stats.resolved)}</b></div>
+     <div class="layerMetric"><small>Average net R</small><b class="${e.stats.avgR>0?'enginePass':'engineFail'}">${e.stats.avgR.toFixed(3)}R</b></div>
+     <div class="layerMetric"><small>Execution Wilson 95%</small><b class="${e.stats.wilson>=.40?'enginePass':'engineFail'}">${pct(e.stats.wilson)}</b></div>
+     <div class="layerMetric"><small>Max drawdown</small><b>${e.stats.maxDD.toFixed(2)}R</b></div>
+     <div class="layerMetric"><small>Fold stability</small><b class="${e.foldPass?'enginePass':'engineFail'}">${e.profitableFolds}/${e.eligibleFolds} profitable • median PF ${displayPF(e.medianFoldPF,999)}</b></div>
+     <div class="layerMetric"><small>Current regime</small><b>${esc(e.currentRegime||'N/A')}</b></div>
+     <div class="layerMetric"><small>Regime gate</small><b class="${regimeClass}">${esc(e.regimeState)}</b></div>
+     <div class="layerMetric"><small>Regime sample / PF</small><b>${e.regimeStats.resolved} • ${displayPF(e.regimeStats.pf,e.regimeStats.resolved)}</b></div>
+   </div>
+   <div class="foldGrid">${e.folds.map(z=>`<div class="foldBox"><small>Execution Fold ${z.fold}</small><b>${z.resolved>=10?('PF '+displayPF(z.pf,z.resolved)):'small N'}</b><small>N ${z.resolved} • Avg ${z.avgR.toFixed(3)}R</small></div>`).join('')}</div>
+   <div class="overlapNote">Hard gate: global execution expectancy + fold stability + no regime SKIP. If current regime sample is insufficient, confidence is capped rather than treated as proof.</div>`:'<div class="hiddenLevels">لا يوجد اتجاه فني صالح لتشغيل Execution Validation.</div>'}`;
+
  const flags=f.integrity.flags?.length?f.integrity.flags.map(x=>`<span class="integrityFlag">${esc(x)}</span>`).join(''):'<span class="integrityOk">No major live integrity flag</span>';
- $('tfIntegrity').innerHTML=`<h2>3 — Market Integrity Engine</h2>
+ $('tfIntegrity').innerHTML=`<h2>4 — Market Integrity Engine</h2>
    <div class="layerGrid">
      <div class="layerMetric"><small>Integrity Score</small><b class="${f.integrity.score>=75?'enginePass':f.integrity.score>=70?'engineWarn':'engineFail'}">${f.integrity.score.toFixed(1)}</b></div>
      <div class="layerMetric"><small>Coverage</small><b>${pct(f.integrity.coverage)}</b></div>
