@@ -2,7 +2,7 @@ const $=id=>document.getElementById(id);
 let deferredPrompt=null,currentLive=null,currentTf='H1';
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
- const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.6',{updateViaCache:'none'});await reg.update();
+ const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.7',{updateViaCache:'none'});await reg.update();
 }catch(e){console.warn(e);}});
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('installBtn').classList.remove('hidden');});
 $('installBtn').onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('installBtn').classList.add('hidden');};
@@ -383,6 +383,52 @@ function paperLevelsPolicy(a,policy=ADAPTIVE_POLICIES.LIVE){
    levelStrength,atrRef:atrv,entryModelVersion:'AdaptiveEntryV2'};
 }
 function paperLevels(a){return UnifiedDecisionEngine.paperLevels(a);}
+
+
+function tacticalStatusClass(s){return s==='BLOCKED'?'statusBlocked':s==='WATCHLIST'?'statusWatch':s==='TACTICAL QUALIFIED'?'statusConfirmed':'statusHigh';}
+function buildTacticalM15(setsByTf,finals,integrity,costBps){
+ const a=finals.M15,h1=finals.H1,d1=finals.D1;
+ const assessment=UnifiedDecisionEngine.tacticalAssessment(a,h1,d1);
+ const validation=UnifiedDecisionEngine.tacticalValidation(setsByTf.M15,costBps);
+ const decision=UnifiedDecisionEngine.tacticalDecision(assessment,validation,integrity);
+ const plan=assessment.side&&assessment.pass&&!assessment.late&&!assessment.hardConflict?UnifiedDecisionEngine.tacticalPaperPlan({...a,side:assessment.side},assessment):null;
+ return{assessment,validation,decision,plan};
+}
+function renderTacticalCard(t){
+ if(!t)return'<h2>Tactical M15 Opportunity</h2><div class="hiddenLevels">Tactical engine unavailable.</div>';
+ const q=t.assessment,s=t.decision.stats,p=t.plan,d=t.decision;
+ const comp=q?.components||{};
+ let html=`<h2>Tactical M15 Opportunity — Parallel Path</h2>
+   <p class="muted">هذا المسار يبحث عن حركة قصيرة قوية على M15 حتى عندما لا تتوافق كل الفريمات. H1/D1 لا يفرضان توافقًا كاملاً؛ يتم استخدامهما فقط لحجب التعارض القوي. Paper/Research فقط.</p>
+   <div class="finalStatus ${tacticalStatusClass(d.status)}">${esc(d.status)}</div>
+   <div class="reasonBox">${(d.reasons||[]).map(x=>`• ${esc(x)}`).join('<br>')}</div>
+   <div class="layerGrid">
+     <div class="layerMetric"><small>Local M15 score</small><b>${q?fmt(q.localScore,1):'N/A'}</b></div>
+     <div class="layerMetric"><small>Tactical quality</small><b class="${q&&q.quality>=72?'enginePass':'engineFail'}">${q?fmt(q.quality,1):'N/A'}</b></div>
+     <div class="layerMetric"><small>Direction</small><b>${q?.side===1?'BULLISH':q?.side===-1?'BEARISH':'NEUTRAL'}</b></div>
+     <div class="layerMetric"><small>Extension from EMA20</small><b>${q&&Number.isFinite(q.extensionAtr)?fmt(q.extensionAtr,2)+' ATR':'N/A'}</b></div>
+     <div class="layerMetric"><small>H1 local context</small><b>${q?fmt(q.h1Local,1):'N/A'}</b></div>
+     <div class="layerMetric"><small>D1 local context</small><b>${q?fmt(q.d1Local,1):'N/A'}</b></div>
+   </div>`;
+ if(s){
+   html+=`<h3>Tactical M15 Historical Validation</h3><div class="layerGrid">
+     <div class="layerMetric"><small>Resolved Tactical OOS N</small><b class="${s.resolved>=80?'enginePass':'engineFail'}">${s.resolved}</b></div>
+     <div class="layerMetric"><small>PF after costs</small><b class="${s.pf>=1.10?'enginePass':'engineFail'}">${displayPF(s.pf,s.resolved)}</b></div>
+     <div class="layerMetric"><small>Average net R</small><b class="${s.avgR>=.02?'enginePass':'engineFail'}">${s.avgR.toFixed(3)}R</b></div>
+     <div class="layerMetric"><small>Wilson 95%</small><b class="${s.wilson>=.42?'enginePass':'engineFail'}">${pct(s.wilson)}</b></div>
+     <div class="layerMetric"><small>Win rate</small><b>${pct(s.winRate)}</b></div>
+     <div class="layerMetric"><small>Max drawdown</small><b>${s.maxDD.toFixed(2)}R</b></div>
+   </div><div class="foldGrid">${(d.folds||[]).map(z=>`<div class="foldBox"><small>Tactical Fold ${z.fold}</small><b>${z.resolved>=10?'PF '+displayPF(z.pf,z.resolved):'small N'}</b><small>N ${z.resolved} • Avg ${z.avgR.toFixed(3)}R</small></div>`).join('')}</div>`;
+ }
+ if(p&&['TACTICAL QUALIFIED','STRONG TACTICAL RESEARCH','WATCHLIST'].includes(d.status)){
+   const ref=d.status==='WATCHLIST';
+   html+=`<div class="tacticalPlan ${ref?'tacticalWatch':''}"><h3>${ref?'Tactical Paper Reference':'Tactical Paper Scenario'}</h3>
+     ${ref?'<span class="referenceBadge">WATCHLIST • REFERENCE ONLY</span>':''}
+     <div class="levels4"><div class="level"><small>Paper Entry</small><strong>${fmt(p.entry,6)}</strong></div><div class="level"><small>Paper Stop</small><strong>${fmt(p.stop,6)}</strong></div><div class="level"><small>Paper TP1</small><strong>${fmt(p.tp1,6)}</strong><div class="rankTag">${(p.targetPct*100).toFixed(2)}%</div></div><div class="level"><small>Paper TP2</small><strong>${fmt(p.tp2,6)}</strong></div></div>
+     <div class="referenceScenario"><b>Model:</b> ${esc(p.mode)}<br><b>Risk:</b> ${fmt(p.risk,6)} • TP1 benchmark 1.00R • TP2 1.60R<br><span class="muted">الهدف لا يُثبت على 1–2%؛ يتكيف مع ATR والبنية. إذا كانت الحركة متأخرة أو تعارض H1 قويًا يتم الحجب بدل مطاردة السعر.</span></div></div>`;
+ }
+ return html;
+}
 
 function confidenceTier(hist,integrity,techScore){
  if(hist.n>=100&&hist.wilson>=.53&&hist.pf>=1.30&&integrity.score>=80&&(techScore>=80||techScore<=20))return'HIGH CONFIDENCE';
@@ -1016,7 +1062,7 @@ function renderResearchResult(symbol,tf,costBps,result,historyN){
 async function runHistoricalResearch(){
  const b=$('runResearchBtn');b.disabled=true;
  const symbol=$('researchSymbol').value.trim().toUpperCase(),market=$('researchMarket').value,tf=$('researchTf').value,costBps=+$('researchCostBps').value;
- if(tf==='D1'){ $('researchStatus').textContent='D1 Research معطّل في V5.6.7.6 حتى يتوفر مسار بيانات أعمق مناسب للمتصفح.';b.disabled=false;return; }
+ if(tf==='D1'){ $('researchStatus').textContent='D1 Research معطّل في V5.6.7.7 حتى يتوفر مسار بيانات أعمق مناسب للمتصفح.';b.disabled=false;return; }
  $('researchStatus').textContent='جاري جلب تاريخ MTF متداخل فعليًا...';
  try{
    const needs=tf==='H1'
@@ -1034,7 +1080,7 @@ async function runHistoricalResearch(){
    const result=buildHistoricalResearch(sets,tf,costBps);
    if(!result.records.length)throw new Error('لم يتم العثور على إشارات كاملة بعد تطبيق MTF + Higher‑TF veto.');
    renderResearchResult(symbol,tf,costBps,result,sets[tf].length);
-   $('researchStatus').textContent=`اكتمل V5.6.7.6 — ${result.records.length} إشارة بعد MTF parity + veto.`;
+   $('researchStatus').textContent=`اكتمل V5.6.7.7 — ${result.records.length} إشارة بعد MTF parity + veto.`;
  }catch(e){$('researchStatus').textContent='خطأ في Historical Simulator: '+e.message;}
  finally{b.disabled=false;}
 }
@@ -1071,15 +1117,20 @@ $('runLiveBtn').onclick=async()=>{
      frames.push(frame);
    }
 
+   const m15Frame=frames.find(x=>x.tf==='M15');
+   $('status').textContent='M15: تشغيل Tactical Opportunity Engine المستقل...';
+   const tactical=buildTacticalM15(setsByTf,finals,m15Frame?.integrity||{score:0,coverage:0},cfg.costBps);
+
    const sides=frames.map(x=>x.a.side||0),bull=sides.filter(x=>x===1).length,bear=sides.filter(x=>x===-1).length,neutral=sides.filter(x=>x===0).length;
    const directionalCount=bull+bear,netConsensus=frames.length?Math.abs(sides.reduce((q,x)=>q+x,0))/frames.length:0;
    const majorityCount=Math.max(bull,bear),majorityDirection=bull>bear?'Bullish':bear>bull?'Bearish':'Split / Neutral';
    const strength=mtfStrength(frames);
-   currentLive={symbol,market,ctx,frames,agreement:netConsensus,netConsensus,directionalCount,bullCount:bull,bearCount:bear,neutralCount:neutral,majorityCount,majorityDirection,strength,cfg};
+   currentLive={symbol,market,ctx,frames,tactical,setsByTf,agreement:netConsensus,netConsensus,directionalCount,bullCount:bull,bearCount:bear,neutralCount:neutral,majorityCount,majorityDirection,strength,cfg};
    // UI helper self-check: fail with a precise message instead of a blank dashboard.
    if(typeof metric!=='function'||typeof statusClass!=='function'||typeof displayPF!=='function')throw new Error('UI helper initialization failed: metric/statusClass/displayPF');
    currentTf='H1';renderLive();
-   $('status').textContent='اكتمل V5.6.7.6: directional OOS + Adaptive Entry execution validation + hard regime gate + stronger execution gate + live integrity.';
+   $('status').textContent='اكتمل V5.6.7.7: Strategic MTF + parallel Tactical M15 + dedicated tactical validation + live integrity.';
+   if(researchWatchTimer&&['TACTICAL QUALIFIED','STRONG TACTICAL RESEARCH'].includes(tactical.decision.status)){const side=tactical.assessment.side===1?'Bullish':'Bearish';sendResearchNotice('Tactical M15 Paper Research',`${symbol} M15: ${side} • ${tactical.decision.status} • quality ${tactical.assessment.quality.toFixed(1)}`,`tactical-qualified:${symbol}:${finals.M15.barCloseTime}:${tactical.assessment.side}`);}
  }catch(e){$('status').textContent='خطأ: '+e.message;}
  finally{b.disabled=false;}
 };
@@ -1098,6 +1149,7 @@ function renderLive(){
    ${metric('Majority Direction',x.majorityDirection+' '+x.majorityCount+'/3')}
    ${metric('Directional Frames',x.directionalCount+'/3')}
    ${metric('Weighted MTF Strength',x.strength.toFixed(1)+'/100')}
+   ${metric('Tactical M15',x.tactical?.decision?.status||'N/A',x.tactical?.decision?.status==='BLOCKED'?'bad':x.tactical?.decision?.status==='WATCHLIST'?'':'good')}
  </div>`;
  $('mtfCards').innerHTML=x.frames.map(f=>`<div class="tfcard">
    <h3>${f.tf}</h3>
@@ -1105,6 +1157,7 @@ function renderLive(){
    <div class="score">${f.a.score.toFixed(1)}</div>
    <p class="muted">${f.tf==='D1'?f.a.regime:(f.a.session+' • '+f.a.regime)}</p>
    <div class="decision ${f.decision.status==='BLOCKED'?'block':f.decision.status==='WATCHLIST'?'watch':'allow'}">${f.decision.status}</div>
+   ${f.tf==='M15'?`<div class="tacticalMini ${x.tactical?.decision?.status==='BLOCKED'?'block':x.tactical?.decision?.status==='WATCHLIST'?'watch':'allow'}">Tactical: ${esc(x.tactical?.decision?.status||'N/A')}</div>`:''}
  </div>`).join('');
  $('tfTabs').innerHTML=x.frames.map(f=>`<button class="tab ${f.tf===currentTf?'active':''}" data-tf="${f.tf}">${f.tf}</button>`).join('');
  $('tfTabs').querySelectorAll('.tab').forEach(b=>b.onclick=()=>{currentTf=b.dataset.tf;$('tfTabs').querySelectorAll('.tab').forEach(z=>z.classList.toggle('active',z.dataset.tf===currentTf));renderTf();});
@@ -1130,10 +1183,12 @@ function renderTf(){
      ${metric('Higher-TF veto',f.veto?'YES':'NO',f.veto?'bad':'good')}
    </div><div class="lockLine">🔒 Technical signal locked to closed ${f.tf} candle: ${esc(lock)}</div>`;
 
- $('tfDecision').innerHTML=`<h2>Final Decision</h2>
+ $('tfDecision').innerHTML=`<h2>Final Decision — Strategic MTF</h2>
    <div class="finalStatus ${statusClass(d.status)}">${d.status}</div>
    <div class="reasonBox">${d.reasons.map(x=>`• ${esc(x)}`).join('<br>')}</div>
-   <p class="muted">Final Status لا يساوي احتمال ربح. هو نتيجة عبور الطبقات الثلاث وفق الحدود الحالية.</p>`;
+   <p class="muted">Strategic Final Status لا يساوي احتمال ربح. Tactical M15 يُفحص بالتوازي في البطاقة التالية ولا يحتاج توافق الفريمات الكامل.</p>`;
+
+ $('tfTactical').innerHTML=f.tf==='M15'?renderTacticalCard(currentLive.tactical):`<h2>Tactical M15 Opportunity — Parallel Path</h2><div class="hiddenLevels">المسار التكتيكي يُعرض داخل تبويب M15 فقط. الفريم ${f.tf} يبقى للمسار الاستراتيجي.</div>`;
 
  $('tfTechnical').innerHTML=`<h2>1 — Technical Engine</h2>
    <p class="muted">المؤشرات المترابطة مدمجة داخل مجموعات حتى لا يتم احتساب نفس حركة السعر عدة مرات.</p>
@@ -1181,7 +1236,7 @@ function renderTf(){
    </div>
    <div class="foldGrid">${e.folds.map(z=>`<div class="foldBox"><small>Execution Fold ${z.fold}</small><b>${z.resolved>=10?('PF '+displayPF(z.pf,z.resolved)):'small N'}</b><small>N ${z.resolved} • Avg ${z.avgR.toFixed(3)}R</small></div>`).join('')}</div>
    <div class="edgeReadiness ${edge.cls}"><b>Edge Readiness:</b> ${esc(edge.label)}<br><small>${esc(edge.details)}</small></div>
-   <div class="overlapNote">Hard gate V5.6.7.6: execution PF ≥1.10 • AvgR ≥0.020R • Wilson ≥42% • 3 profitable eligible folds • median PF ≥1.05 • current regime must be ALLOW. Under-sampled/developing regimes become WATCHLIST, not Confirmed.</div>`:'<div class="hiddenLevels">لا يوجد اتجاه فني صالح لتشغيل Execution Validation.</div>'}`;
+   <div class="overlapNote">Hard gate V5.6.7.7: execution PF ≥1.10 • AvgR ≥0.020R • Wilson ≥42% • 3 profitable eligible folds • median PF ≥1.05 • current regime must be ALLOW. Under-sampled/developing regimes become WATCHLIST, not Confirmed.</div>`:'<div class="hiddenLevels">لا يوجد اتجاه فني صالح لتشغيل Execution Validation.</div>'}`;
 
  const flags=f.integrity.flags?.length?f.integrity.flags.map(x=>`<span class="integrityFlag">${esc(x)}</span>`).join(''):'<span class="integrityOk">No major live integrity flag</span>';
  $('tfIntegrity').innerHTML=`<h2>4 — Market Integrity Engine</h2>
@@ -1227,7 +1282,7 @@ function renderTf(){
 
 
 let researchWatchTimer=null,watchOpenTimes={},watchAlertKeys=new Set();
-function watchEnabled(){return localStorage.getItem('trend_research_watch_v5676')==='1';}
+function watchEnabled(){return localStorage.getItem('trend_research_watch_v5677')==='1';}
 function updateWatchUi(){const b=$('toggleWatchBtn'),st=$('watchState');if(!b||!st)return;const on=!!researchWatchTimer;st.textContent=on?'ON • PAPER RESEARCH':'OFF';st.className=on?'watchOn':'watchOff';b.textContent=on?'إيقاف Research Watch':'تشغيل Research Watch';}
 function sendResearchNotice(title,body,key){
  if(watchAlertKeys.has(key))return;watchAlertKeys.add(key);
@@ -1258,14 +1313,25 @@ async function researchWatchPoll(){
      }
    }catch{}
  }
+ // Tactical M15 can be active even when the strategic M15 frame is BLOCKED.
+ const t=currentLive.tactical;
+ if(t?.plan&&['WATCHLIST','TACTICAL QUALIFIED','STRONG TACTICAL RESEARCH'].includes(t.decision.status)){
+   try{
+     const bar=await fetchCurrentKline(currentLive.symbol,'15m',currentLive.market);
+     const px=bar.close,atrv=Math.max(t.plan.atrRef||0,Math.abs(px)*.001,1e-12),dist=Math.abs(px-t.plan.entry)/atrv;
+     if(dist<=.25)sendResearchNotice('Tactical Paper level nearby',`${currentLive.symbol} M15: السعر اقترب من Tactical Paper Entry (${dist.toFixed(2)} ATR).`, `tnear:${currentLive.symbol}:${bar.time}:${t.assessment.side}`);
+     if(watchOpenTimes.TACTICAL_M15==null)watchOpenTimes.TACTICAL_M15=bar.time;
+     else if(bar.time!==watchOpenTimes.TACTICAL_M15){watchOpenTimes.TACTICAL_M15=bar.time;setTimeout(()=>$('runLiveBtn')?.click(),300);}
+   }catch{}
+ }
 }
 async function startResearchWatch(){
  if(researchWatchTimer)return;
  if('Notification'in window&&Notification.permission==='default'){try{await Notification.requestPermission();}catch{}}
- localStorage.setItem('trend_research_watch_v5676','1');watchOpenTimes={};watchAlertKeys.clear();
+ localStorage.setItem('trend_research_watch_v5677','1');watchOpenTimes={};watchAlertKeys.clear();
  researchWatchTimer=setInterval(researchWatchPoll,60000);updateWatchUi();researchWatchPoll();
 }
-function stopResearchWatch(){if(researchWatchTimer){clearInterval(researchWatchTimer);researchWatchTimer=null;}localStorage.setItem('trend_research_watch_v5676','0');updateWatchUi();}
+function stopResearchWatch(){if(researchWatchTimer){clearInterval(researchWatchTimer);researchWatchTimer=null;}localStorage.setItem('trend_research_watch_v5677','0');updateWatchUi();}
 if($('toggleWatchBtn'))$('toggleWatchBtn').onclick=()=>researchWatchTimer?stopResearchWatch():startResearchWatch();
 
 if($('runResearchBtn'))$('runResearchBtn').onclick=runHistoricalResearch;

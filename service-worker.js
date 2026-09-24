@@ -1,11 +1,11 @@
-const CACHE='trend-v5-6-7-6-20260922';
+const CACHE='trend-v5-6-7-7-20260924';
 const CORE=[
- './style.css?v=5.6.7.6',
- './decision-engine.js?v=5.6.7.6',
- './app.js?v=5.6.7.6',
- './scanner.html?v=5.6.7.6',
- './scanner.js?v=5.6.7.6',
- './manifest.webmanifest?v=5.6.7.6',
+ './style.css?v=5.6.7.7',
+ './decision-engine.js?v=5.6.7.7',
+ './app.js?v=5.6.7.7',
+ './scanner.html?v=5.6.7.7',
+ './scanner.js?v=5.6.7.7',
+ './manifest.webmanifest?v=5.6.7.7',
  './icon-192.png','./icon-512.png'
 ];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE)).catch(()=>{}));self.skipWaiting();});

@@ -6,17 +6,17 @@
   <meta name="theme-color" content="#06111f">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>Chart Trend Analyzer V5.6.7.6</title>
-  <link rel="manifest" href="manifest.webmanifest?v=5.6.7.6">
+  <title>Chart Trend Analyzer V5.6.7.7</title>
+  <link rel="manifest" href="manifest.webmanifest?v=5.6.7.7">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="style.css?v=5.6.7.6">
+  <link rel="stylesheet" href="style.css?v=5.6.7.7">
 </head>
 <body>
 <main class="wrap">
   <header class="topbar">
     <div>
-      <h1>Chart Trend Analyzer <span>V5.6.7.6</span></h1>
+      <h1>Chart Trend Analyzer <span>V5.6.7.7</span></h1>
       <p>Statistical Validation • Purged Walk‑Forward • Signal Lock • Paper Research</p>
     </div>
     <button id="installBtn" class="install hidden">تثبيت التطبيق</button>
@@ -24,10 +24,10 @@
 
   <section class="card scannerLaunch">
     <div>
-      <h2>Crypto Market Scanner V5.6.7.6</h2>
+      <h2>Crypto Market Scanner V5.6.7.7</h2>
       <p class="muted">Scanner للاكتشاف، لكن المرشح النهائي وLive MTF يستخدمان نفس Unified Decision Engine ونفس Directional OOS + Adaptive Entry Execution Gate + Market Integrity.</p>
     </div>
-    <a class="scannerLaunchBtn" href="scanner.html?v=5.6.7.6">فتح Market Scanner</a>
+    <a class="scannerLaunchBtn" href="scanner.html?v=5.6.7.7">فتح Market Scanner</a>
   </section>
 
   <section class="card">
@@ -94,11 +94,15 @@
         </label>
       </div>
       <button id="runLiveBtn" class="primary">تحليل شامل الآن</button>
-      <p class="muted">التحليل الفني يستخدم آخر شمعة مغلقة فقط. Market Integrity يبقى Live، ويمكنه الحجب لكنه لا يقلب الاتجاه الفني داخل نفس الشمعة.</p>
+      <div class="watchControls">
+        <button id="toggleWatchBtn" class="smallBtn">تشغيل Research Watch</button>
+        <span id="watchState" class="watchOff">OFF</span>
+      </div>
+      <p class="muted">نفس أمر Live MTF يشغّل مسارين: Strategic MTF الحالي + Tactical M15 للفرص القصيرة القوية دون اشتراط توافق كامل للفريمات. التحليل الفني يستخدم آخر شمعة مغلقة فقط. Research Watch تنبيهي فقط وقد يتوقف إذا قام الهاتف بتعليق التطبيق في الخلفية.</p>
     </div>
 
     <div id="researchControls" class="hidden">
-      <h2>V5.6.7.6 — Hard Execution Gate + Regime Validation</h2>
+      <h2>V5.6.7.7 — Hard Execution Gate + Regime Validation</h2>
       <p class="muted">يقارن نفس الإشارات التاريخية بين Breakout Close وBreakout + Retest وAdaptive Entry V2. هذه النسخة لا تكتفي بصحة الاتجاه: يجب أن يثبت نموذج التنفيذ نفسه PF موجبًا بعد التكلفة، Expectancy موجبة، استقرارًا عبر Folds، وأن تكون حالة السوق الحالية ALLOW قبل رفع السيناريو من WATCHLIST إلى Confirmed. التنفيذ البحثي عند Open الشمعة التالية فقط.</p>
       <div class="formgrid">
         <label>الرمز<input id="researchSymbol" value="ADAUSDT" placeholder="ADAUSDT"></label>
@@ -146,6 +150,7 @@
     <div id="tfTabs" class="tabs"></div>
     <section id="tfSummary" class="card"></section>
     <section id="tfDecision" class="card"></section>
+    <section id="tfTactical" class="card"></section>
     <section id="tfTechnical" class="card"></section>
     <section id="tfHistorical" class="card"></section>
     <section id="tfExecution" class="card"></section>
@@ -157,7 +162,7 @@
   </section>
 
   <section class="card architectureCard">
-    <h2>V5.6.7.6 Decision Architecture</h2>
+    <h2>V5.6.7.7 Decision Architecture</h2>
     <div class="architecture">
       <div class="archLayer">
         <span class="archNum">1</span>
@@ -174,6 +179,11 @@
         <div><b>Adaptive Entry Execution Validation</b><small>Same Paper lifecycle • next-candle-open execution • PF ≥1.10 • AvgR ≥0.020R • Wilson ≥42% • fold stability</small></div>
       </div>
       <div class="archArrow">↓</div>
+      <div class="archLayer tacticalArch">
+        <span class="archNum">T</span>
+        <div><b>Parallel Tactical M15 Engine</b><small>Local M15 impulse • no full MTF agreement required • strong-opposite H1/D1 guard • late-entry guard • dedicated Tactical OOS • adaptive short target</small></div>
+      </div>
+      <div class="archArrow">↓</div>
       <div class="archLayer">
         <span class="archNum">4</span>
         <div><b>Hard Regime + Market Integrity Gate</b><small>Current regime must be ALLOW • under-sampled/developing = WATCHLIST • Spread • Depth • Cross-source • Anomalies</small></div>
@@ -184,10 +194,10 @@
         <div><b>Final Status</b><small>BLOCKED • NEAR-QUALIFIED • PRELIMINARY • CONFIRMED • HIGH CONFIDENCE</small></div>
       </div>
     </div>
-    <p class="muted">Technical Score وFinal Status ليسا احتمال ربح. V5.6.7.6 يجعل Regime الحالي بوابة فعلية بدل ملاحظة فقط، ويمنع ترقية سيناريو عندما تكون عينة التنفيذ ضعيفة أو غير مستقرة. Edge Readiness داخل النتائج يصف قوة الدليل البحثي فقط، وليس ضمانًا مستقبليًا. كل المستويات Paper/Research فقط.</p>
+    <p class="muted">Technical Score وFinal Status ليسا احتمال ربح. V5.6.7.7 يضيف مسار Tactical M15 مستقلًا للفرص القصيرة القوية دون إلغاء المسار الاستراتيجي. Regime الحالي يبقى بوابة فعلية للمسار الاستراتيجي، بينما Tactical يستخدم بوابة M15 محلية + حارس تعارض قوي للفريمات الأعلى + تحقق تاريخي مستقل. Edge Readiness وTactical Status يصفان قوة الدليل البحثي فقط، وليس ضمانًا مستقبليًا. كل المستويات Paper/Research فقط.</p>
   </section>
 </main>
-<script src="decision-engine.js?v=5.6.7.6"></script>
-<script src="app.js?v=5.6.7.6"></script>
+<script src="decision-engine.js?v=5.6.7.7"></script>
+<script src="app.js?v=5.6.7.7"></script>
 </body>
 </html>

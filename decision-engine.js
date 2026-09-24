@@ -300,6 +300,139 @@ function paperLevels(a,policy=LIVE_POLICY){
    resistanceTouches:a.resistanceTouches||0,supportTouches:a.supportTouches||0,policyName:policy.name,policyConfig:{...policy},preBreakoutQuality:pre.score,preDecision:pre.decision,levelStrength,atrRef:atrv,entryModelVersion:'AdaptiveEntryV2'};
 }
 
+
+
+// V5.6.7.7 — parallel Tactical M15 research path.
+// It is deliberately independent from full MTF agreement: M15 supplies the local impulse,
+// while H1/D1 are used only as conflict-risk guards. All outputs remain Paper/Research.
+const TACTICAL_POLICY={
+  name:'Tactical M15 V1',localBull:70,localBear:30,minQuality:72,
+  maxExtensionAtr:2.00,softExtensionAtr:1.35,minVolumeRatio:.65,
+  hardOppositeH1:20,hardOppositeD1:15,strongOppositeH1:25,strongOppositeD1:20,
+  riskAtr:.75,minRiskAtr:.60,maxRiskAtr:1.10,tp1R:1.00,tp2R:1.60,
+  horizon:10,step:4,purge:10,folds:4,minN:80,
+  minPF:1.10,minAvgR:.02,minWilson:.42,minProfitableFolds:3,minMedianPF:1.05
+};
+function tacticalDirectionalValue(x,side){return side===1?x:100-x;}
+function tacticalAssessment(a,h1=null,d1=null,policy=TACTICAL_POLICY){
+  const localScore=normBase(a);
+  const side=localScore>=policy.localBull?1:localScore<=policy.localBear?-1:0;
+  if(!side)return{side:0,localScore,quality:50,pass:false,hardConflict:false,late:false,reasons:['M15 local score is not directional enough']};
+  const dStructure=tacticalDirectionalValue(a.structure,side),dTrend=tacticalDirectionalValue(a.trend,side),dMomentum=tacticalDirectionalValue(a.momentum,side),dStrength=tacticalDirectionalValue(a.strength,side),dVolume=tacticalDirectionalValue(a.volumeFlow,side),dSR=tacticalDirectionalValue(a.srBreakout,side);
+  const closeLoc=side===1?(a.closeLocationLong||.5):(a.closeLocationShort||.5);
+  const bodyScore=clamp((a.candleBodyAtr||0)/.80*100),closeScore=clamp(closeLoc*100);
+  const candleQuality=bodyScore*.45+closeScore*.55;
+  let quality=dStructure*.15+dTrend*.15+dMomentum*.20+dStrength*.15+dVolume*.15+dSR*.10+candleQuality*.10;
+  const reasons=[];
+  if(a.regime==='Trending')quality+=3;
+  else if(a.regime==='Ranging'){quality-=4;reasons.push('M15 is ranging: tactical quality reduced');}
+  if((a.volumeRatio||0)<policy.minVolumeRatio){quality-=7;reasons.push('Participation/volume is light');}
+  const atrv=Math.max(a.atr||0,Math.abs(a.price||0)*.001,1e-12),extensionAtr=Math.abs((a.price||0)-(a.ema20||a.price||0))/atrv;
+  let late=false;
+  if(extensionAtr>policy.maxExtensionAtr){late=true;reasons.push(`Move already extended ${extensionAtr.toFixed(2)} ATR from EMA20`);}
+  else if(extensionAtr>policy.softExtensionAtr){quality-=6;reasons.push(`Extension penalty ${extensionAtr.toFixed(2)} ATR`);}
+  if(side===1&&(a.rsi||50)>82){late=true;reasons.push('Long impulse is statistically stretched by RSI');}
+  if(side===-1&&(a.rsi||50)<18){late=true;reasons.push('Short impulse is statistically stretched by RSI');}
+
+  const h1Local=h1?normBase(h1):50,d1Local=d1?normBase(d1):50;
+  let hardConflict=false,contextPenalty=0;
+  if(h1){
+    const h1Opp=side===1?h1Local<=policy.strongOppositeH1:h1Local>=100-policy.strongOppositeH1;
+    const h1Hard=side===1?h1Local<=policy.hardOppositeH1:h1Local>=100-policy.hardOppositeH1;
+    if(h1Hard&&(h1.adx||0)>=22){hardConflict=true;reasons.push('H1 is strongly opposite with trend strength');}
+    else if(h1Opp){contextPenalty+=8;reasons.push('H1 is opposite: tactical confidence reduced');}
+  }
+  if(d1){
+    const d1Hard=side===1?d1Local<=policy.hardOppositeD1:d1Local>=100-policy.hardOppositeD1;
+    const d1Opp=side===1?d1Local<=policy.strongOppositeD1:d1Local>=100-policy.strongOppositeD1;
+    if(d1Hard&&h1&&((side===1&&h1Local<40)||(side===-1&&h1Local>60))){hardConflict=true;reasons.push('D1 + H1 create a strong opposite higher-timeframe conflict');}
+    else if(d1Opp){contextPenalty+=4;reasons.push('D1 is opposite: small tactical penalty');}
+  }
+  quality=clamp(quality-contextPenalty);
+  const pass=!hardConflict&&!late&&quality>=policy.minQuality;
+  if(quality<policy.minQuality)reasons.push(`Tactical quality ${quality.toFixed(1)} < ${policy.minQuality}`);
+  return{side,localScore,quality,pass,hardConflict,late,extensionAtr,candleQuality,h1Local,d1Local,contextPenalty,reasons,
+    components:{structure:dStructure,trend:dTrend,momentum:dMomentum,strength:dStrength,volume:dVolume,sr:dSR,candle:candleQuality}};
+}
+function tacticalPaperPlan(a,assessment,policy=TACTICAL_POLICY){
+  const side=assessment.side;if(!side)return null;
+  const atrv=Math.max(a.atr||0,Math.abs(a.price||0)*.001,1e-12),entry=(a.price||0)+(side===1?.04:-.04)*atrv;
+  let structuralRisk=policy.riskAtr*atrv;
+  if(side===1&&Number.isFinite(a.support)&&a.support<entry){const r=entry-(a.support-.08*atrv);if(r>0)structuralRisk=r;}
+  if(side===-1&&Number.isFinite(a.resistance)&&a.resistance>entry){const r=(a.resistance+.08*atrv)-entry;if(r>0)structuralRisk=r;}
+  const risk=Math.max(policy.minRiskAtr*atrv,Math.min(structuralRisk,policy.maxRiskAtr*atrv));
+  const stop=side===1?entry-risk:entry+risk,tp1=side===1?entry+policy.tp1R*risk:entry-policy.tp1R*risk,tp2=side===1?entry+policy.tp2R*risk:entry-policy.tp2R*risk;
+  const targetPct=Math.abs(tp1-entry)/Math.max(Math.abs(entry),1e-12);
+  const mode=(side===1?'Tactical M15 bullish impulse':'Tactical M15 bearish impulse')+' — next-open research confirmation';
+  return{side,entry,stop,tp1,tp2,risk,atrRef:atrv,targetPct,mode,quality:assessment.quality,localScore:assessment.localScore,policyName:policy.name};
+}
+function tacticalOutcome(cs,signalIndex,side,a,costBps=10,policy=TACTICAL_POLICY){
+  const execIndex=signalIndex+1;if(execIndex>=cs.length)return null;
+  const atrv=Math.max(a.atr||0,Math.abs(a.price||0)*.001,1e-12),entry=cs[execIndex].open;
+  const gapAtr=Math.abs(entry-(a.price||entry))/atrv;
+  if(gapAtr>.45)return{triggered:false,resolved:false,ambiguous:false,r:null,reason:'GAP_TOO_LARGE',execIndex};
+  let structuralRisk=policy.riskAtr*atrv;
+  if(side===1&&Number.isFinite(a.support)&&a.support<entry){const r=entry-(a.support-.08*atrv);if(r>0)structuralRisk=r;}
+  if(side===-1&&Number.isFinite(a.resistance)&&a.resistance>entry){const r=(a.resistance+.08*atrv)-entry;if(r>0)structuralRisk=r;}
+  const risk=Math.max(policy.minRiskAtr*atrv,Math.min(structuralRisk,policy.maxRiskAtr*atrv));
+  const stop=side===1?entry-risk:entry+risk,tp1=side===1?entry+policy.tp1R*risk:entry-policy.tp1R*risk;
+  const costR=executionCostR(entry,risk,costBps),end=Math.min(cs.length-1,execIndex+policy.horizon);
+  for(let j=execIndex;j<=end;j++){
+    const b=cs[j],stopHit=side===1?b.low<=stop:b.high>=stop,tpHit=side===1?b.high>=tp1:b.low<=tp1;
+    if(stopHit&&tpHit)return{triggered:true,resolved:false,ambiguous:true,r:null,reason:'AMBIGUOUS',execIndex,exitIndex:j};
+    if(stopHit)return{triggered:true,resolved:true,ambiguous:false,r:-(1+costR),reason:'STOP',execIndex,exitIndex:j};
+    if(tpHit)return{triggered:true,resolved:true,ambiguous:false,r:policy.tp1R-costR,reason:'TP1',execIndex,exitIndex:j};
+  }
+  const last=cs[end],raw=(side===1?(last.close-entry):(entry-last.close))/Math.max(risk,1e-12);
+  return{triggered:true,resolved:true,ambiguous:false,r:raw-costR,reason:'TIME_EXIT',execIndex,exitIndex:end};
+}
+function tacticalAggregate(rows){
+  const triggered=rows.filter(x=>x.triggered),resolved=triggered.filter(x=>x.resolved&&Number.isFinite(x.r)),wins=resolved.filter(x=>x.r>0),losses=resolved.filter(x=>x.r<0);
+  const gw=wins.reduce((s,x)=>s+x.r,0),gl=Math.abs(losses.reduce((s,x)=>s+x.r,0)),pf=gl?gw/gl:(gw?Infinity:0);
+  let eq=0,peak=0,maxDD=0;for(const x of resolved){eq+=x.r;peak=Math.max(peak,eq);maxDD=Math.max(maxDD,peak-eq);}
+  return{signals:rows.length,triggered:triggered.length,resolved:resolved.length,wins:wins.length,losses:losses.length,winRate:resolved.length?wins.length/resolved.length:0,pf,avgR:resolved.length?resolved.reduce((s,x)=>s+x.r,0)/resolved.length:0,wilson:wilsonLower95(wins.length,resolved.length),maxDD,ambiguous:triggered.filter(x=>x.ambiguous).length};
+}
+function tacticalValidation(cs,costBps=10,policy=TACTICAL_POLICY){
+  const empty=tacticalAggregate([]);if(!Array.isArray(cs)||cs.length<700)return{available:false,long:empty,short:empty,foldsLong:[],foldsShort:[],policy};
+  const firstIdx=330,lastIdx=cs.length-policy.horizon-2,rawSignals=[];
+  for(let i=firstIdx;i<=lastIdx;i+=policy.step){
+    const a=technicalCore(cs.slice(Math.max(0,i-319),i+1)),assess=tacticalAssessment(a,null,null,policy);
+    if(!assess.pass||!assess.side)continue;
+    rawSignals.push({i,side:assess.side,a});
+  }
+  const testStart=Math.floor(firstIdx+(lastIdx-firstIdx)*.40),span=Math.max(1,lastIdx-testStart+1),foldSize=Math.max(1,Math.floor(span/policy.folds)),rows=[];
+  for(let f=0;f<policy.folds;f++){
+    const rawStart=testStart+f*foldSize,rawEnd=f===policy.folds-1?lastIdx:testStart+(f+1)*foldSize-1,start=rawStart+policy.purge,end=rawEnd-policy.horizon;
+    for(const sig of rawSignals){
+      if(sig.i<start||sig.i>end)continue;
+      const out=tacticalOutcome(cs,sig.i,sig.side,sig.a,costBps,policy);if(out)rows.push({...out,fold:f,side:sig.side,signalIndex:sig.i});
+    }
+  }
+  const foldStats=side=>Array.from({length:policy.folds},(_,f)=>({fold:f+1,...tacticalAggregate(rows.filter(x=>x.side===side&&x.fold===f))}));
+  return{available:true,long:tacticalAggregate(rows.filter(x=>x.side===1)),short:tacticalAggregate(rows.filter(x=>x.side===-1)),foldsLong:foldStats(1),foldsShort:foldStats(-1),policy,signals:rawSignals.length,rows};
+}
+function tacticalDecision(assessment,validation,integrity,policy=TACTICAL_POLICY){
+  const reasons=[];
+  if(!assessment?.side)return{status:'BLOCKED',reasons:['No strong local M15 tactical direction'],stats:null,folds:[]};
+  if(assessment.hardConflict)return{status:'BLOCKED',reasons:['Strong higher-timeframe conflict',...assessment.reasons],stats:null,folds:[]};
+  if(assessment.late)return{status:'BLOCKED',reasons:['Move is already extended; chasing is blocked',...assessment.reasons],stats:null,folds:[]};
+  if(!assessment.pass)return{status:'BLOCKED',reasons:assessment.reasons,stats:null,folds:[]};
+  if((integrity?.score||0)<75)return{status:'BLOCKED',reasons:[`Market Integrity ${(integrity?.score||0).toFixed(1)} < 75`],stats:null,folds:[]};
+  if((integrity?.coverage||0)<.50)return{status:'BLOCKED',reasons:['Market Integrity coverage < 50%'],stats:null,folds:[]};
+  if(!validation?.available)return{status:'WATCHLIST',reasons:['Tactical historical sample unavailable'],stats:null,folds:[]};
+  const stats=assessment.side===1?validation.long:validation.short,folds=assessment.side===1?validation.foldsLong:validation.foldsShort;
+  const eligible=folds.filter(x=>x.resolved>=10),profitable=eligible.filter(x=>x.pf>=1&&x.avgR>=0).length,medPF=eligible.length?median(eligible.map(x=>x.pf)):0;
+  if(stats.resolved<policy.minN)reasons.push(`Tactical OOS N ${stats.resolved} < ${policy.minN}`);
+  if(stats.pf<policy.minPF)reasons.push(`Tactical PF ${Number.isFinite(stats.pf)?stats.pf.toFixed(2):'∞'} < ${policy.minPF.toFixed(2)}`);
+  if(stats.avgR<policy.minAvgR)reasons.push(`Tactical AvgR ${stats.avgR.toFixed(3)}R < ${policy.minAvgR.toFixed(3)}R`);
+  if(stats.wilson<policy.minWilson)reasons.push(`Tactical Wilson95 ${(stats.wilson*100).toFixed(1)}% < ${(policy.minWilson*100).toFixed(0)}%`);
+  if(profitable<policy.minProfitableFolds||medPF<policy.minMedianPF)reasons.push(`Tactical fold stability ${profitable}/${eligible.length}; median PF ${medPF.toFixed(2)}`);
+  const close=stats.resolved>=Math.max(40,policy.minN*.60)&&stats.pf>=1.00&&stats.avgR>=0&&stats.wilson>=.38&&profitable>=2;
+  if(reasons.length)return{status:close?'WATCHLIST':'BLOCKED',reasons,stats,folds,profitableFolds:profitable,eligibleFolds:eligible.length,medianFoldPF:medPF};
+  const strong=stats.resolved>=150&&stats.pf>=1.25&&stats.avgR>=.05&&stats.wilson>=.45&&profitable>=3&&medPF>=1.15&&assessment.quality>=80;
+  return{status:strong?'STRONG TACTICAL RESEARCH':'TACTICAL QUALIFIED',reasons:['Strong local M15 impulse','Tactical OOS gate passed',`Fold stability ${profitable}/${eligible.length}`,assessment.contextPenalty?`Higher-TF context penalty ${assessment.contextPenalty.toFixed(0)} points — still below hard-conflict threshold`:'No material higher-TF conflict'],stats,folds,profitableFolds:profitable,eligibleFolds:eligible.length,medianFoldPF:medPF};
+}
+
 function executionExpiryBars(tf){return tf==='M15'?16:tf==='H1'?8:5;}
 function executionHoldBars(tf){return tf==='M15'?32:tf==='H1'?24:12;}
 function executionVolumeRatioAt(cs,idx){
@@ -456,7 +589,7 @@ function executionValidation(sets,tf,costBps=10,pwf=null,side=null,currentA=null
  if(!foldPass)hardBlockReasons.push('FOLD_INSTABILITY');
  if(regimeState==='SKIP_SETUP')hardBlockReasons.push('REGIME_SKIP');
  if(regimeState!=='ALLOW')hardBlockReasons.push('REGIME_NOT_VALIDATED');
- // V5.6.7.6: the current regime is a real execution gate. Under-sampled or developing regimes
+ // V5.6.7.7: the current regime is a real execution gate. Under-sampled or developing regimes
  // can be monitored as research watchlists, but they do not qualify as execution-ready scenarios.
  const hardPass=globalPass&&foldPass&&regimeState==='ALLOW';
  const pass=hardPass;
@@ -474,10 +607,11 @@ function executionValidation(sets,tf,costBps=10,pwf=null,side=null,currentA=null
 }
 
 root.UnifiedDecisionEngine={
- version:'5.6.7.6',
+ version:'5.6.7.7',
  validationSpec,technicalCore,contextScore,finalizeOne,finalizeCurrent,higherTfVeto,
  historicalSnapshot,fullStartIndex,purgedWalkForward,validationMode,paperLevels,entryQualityV2,adaptiveBreakoutDecision,
  executionValidation,executionRegimeBucket,aggregateExecution,LIVE_POLICY,
+ tacticalDecision,tacticalAssessment,tacticalPaperPlan,tacticalValidation,tacticalAggregate,TACTICAL_POLICY,
  wilsonLower95,atr,clamp,normBase
 };
 })(typeof window!=='undefined'?window:globalThis);
