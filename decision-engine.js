@@ -302,7 +302,7 @@ function paperLevels(a,policy=LIVE_POLICY){
 
 
 
-// V5.6.7.7 — parallel Tactical M15 research path.
+// V5.6.7.8 — parallel Tactical M15 research path.
 // It is deliberately independent from full MTF agreement: M15 supplies the local impulse,
 // while H1/D1 are used only as conflict-risk guards. All outputs remain Paper/Research.
 const TACTICAL_POLICY={
@@ -589,7 +589,7 @@ function executionValidation(sets,tf,costBps=10,pwf=null,side=null,currentA=null
  if(!foldPass)hardBlockReasons.push('FOLD_INSTABILITY');
  if(regimeState==='SKIP_SETUP')hardBlockReasons.push('REGIME_SKIP');
  if(regimeState!=='ALLOW')hardBlockReasons.push('REGIME_NOT_VALIDATED');
- // V5.6.7.7: the current regime is a real execution gate. Under-sampled or developing regimes
+ // V5.6.7.8: the current regime is a real execution gate. Under-sampled or developing regimes
  // can be monitored as research watchlists, but they do not qualify as execution-ready scenarios.
  const hardPass=globalPass&&foldPass&&regimeState==='ALLOW';
  const pass=hardPass;
@@ -607,7 +607,7 @@ function executionValidation(sets,tf,costBps=10,pwf=null,side=null,currentA=null
 }
 
 root.UnifiedDecisionEngine={
- version:'5.6.7.7',
+ version:'5.6.7.8',
  validationSpec,technicalCore,contextScore,finalizeOne,finalizeCurrent,higherTfVeto,
  historicalSnapshot,fullStartIndex,purgedWalkForward,validationMode,paperLevels,entryQualityV2,adaptiveBreakoutDecision,
  executionValidation,executionRegimeBucket,aggregateExecution,LIVE_POLICY,

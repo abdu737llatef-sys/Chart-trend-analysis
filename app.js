@@ -2,7 +2,7 @@ const $=id=>document.getElementById(id);
 let deferredPrompt=null,currentLive=null,currentTf='H1';
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
- const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.7',{updateViaCache:'none'});await reg.update();
+ const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.8',{updateViaCache:'none'});await reg.update();
 }catch(e){console.warn(e);}});
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('installBtn').classList.remove('hidden');});
 $('installBtn').onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('installBtn').classList.add('hidden');};
@@ -107,7 +107,7 @@ function scenarioNextAction(s){
  if(s.state==='PAUSED_INTEGRITY')
    return `السيناريو موقوف مؤقتًا بسبب Market Integrity؛ لا يتم إنشاء Trigger جديد حتى عودة الحد الأدنى.`;
  if(s.state==='PAUSED_VALIDATION')
-   return `السيناريو موقوف بحثيًا لأن بوابة Historical/Execution Validation لم تعد مجتازة. يبقى محفوظًا ولا يتم إنشاء Paper Trigger جديد حتى تعود الشروط.`;
+   return `السيناريو موقوف بحثيًا لأن بوابة Historical/Execution Validation غير مجتازة حاليًا. يمكن للـResearch Watch تسجيل اختراقات مرجعية مبكرة، لكن لا يتم إنشاء Paper Trigger حتى يعود نفس الفريم إلى CONFIRMED/HIGH CONFIDENCE على شمعة مغلقة.`;
  if(s.state==='PAUSED_TECHNICAL')
    return `السيناريو محفوظ لكن Current Setup أصبح Neutral. لا يتم تفعيل اختراق جديد حتى يعود نفس الاتجاه الفني قبل انتهاء الصلاحية.`;
  if(s.state==='STALE_REVALIDATION')
@@ -238,6 +238,17 @@ async function fetchCurrentKline(symbol,interval,market){
  const x=d[0];
  return{time:+x[0],open:+x[1],high:+x[2],low:+x[3],close:+x[4],volume:+x[5],closeTime:+x[6],isOpen:+x[6]>=Date.now()};
 }
+
+async function fetchRecentKlines(symbol,interval,market,limit=4){
+ const clean=symbol.toUpperCase().replace(/[^A-Z0-9]/g,'');
+ const base=market==='futures'?'https://fapi.binance.com/fapi/v1/klines':'https://data-api.binance.vision/api/v3/klines';
+ const r=await fetch(`${base}?symbol=${clean}&interval=${interval}&limit=${Math.max(2,Math.min(10,limit))}`,{cache:'no-store'});
+ const d=await r.json();
+ if(!r.ok||!Array.isArray(d)||!d.length)return[];
+ const now=Date.now();
+ return d.map(x=>({time:+x[0],open:+x[1],high:+x[2],low:+x[3],close:+x[4],volume:+x[5],closeTime:+x[6],isOpen:+x[6]>=now}));
+}
+function latestClosedBar(rows){const now=Date.now();return(rows||[]).filter(x=>(x.closeTime||0)<now).at(-1)||null;}
 
 async function fetchJson(url,timeout=12000){
  const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),timeout);
@@ -502,7 +513,8 @@ function createScenarioIfNeeded(frame,cs,symbol){
    lastUpdate:Date.now(),entry:L.entry,stop:L.stop,tp1:L.tp1,tp2:L.tp2,
    mode:L.mode,entryReason:L.entryReason,triggerMode:L.triggerMode,breakoutLevel:L.breakoutLevel,
    retestLow:L.retestLow,retestHigh:L.retestHigh,
-   referenceOnly:['BLOCKED','WATCHLIST'].includes(d.status),sourceStatus:d.status,
+   referenceOnly:!['CONFIRMED','HIGH CONFIDENCE'].includes(d.status),sourceStatus:d.status,
+   executionArmed:['CONFIRMED','HIGH CONFIDENCE'].includes(d.status),armedBarCloseTime:['CONFIRMED','HIGH CONFIDENCE'].includes(d.status)?frame.a.barCloseTime:null,
    expiryBars:expiryBars(frame.tf),barCount:0,
    resistanceStrength:L.resistanceStrength,supportStrength:L.supportStrength,
    resistanceTouches:L.resistanceTouches,supportTouches:L.supportTouches,
@@ -519,9 +531,12 @@ function updateScenarioLifecycle(symbol,frame,cs,currentBar=null){
    let s=migrateScenarioText(raw);
    if(s.symbol!==symbol||s.tf!==frame.tf||isTerminalScenarioState(s.state))return s;
 
-   const bars=barsAfter(cs,s.createdBarCloseTime);
-   const fresh={...s,barCount:bars.length,lastUpdate:Date.now()};
+   const allBars=barsAfter(cs,s.createdBarCloseTime);
+   let bars=barsAfter(cs,s.armedBarCloseTime||s.createdBarCloseTime);
+   const fresh={...s,barCount:allBars.length,lastUpdate:Date.now()};
    if(!Number.isFinite(fresh.atrAtCreation))fresh.atrAtCreation=frame.a.atr;
+   const qualifiedNow=['CONFIRMED','HIGH CONFIDENCE'].includes(frame.decision?.status);
+   if(typeof fresh.executionArmed!=='boolean')fresh.executionArmed=!fresh.referenceOnly&&['CONFIRMED','HIGH CONFIDENCE'].includes(fresh.sourceStatus||'');
 
    const currentLevel=fresh.side===1?frame.a.resistance:frame.a.support;
    const currentAtr=Math.max(frame.a.atr||0,1e-12);
@@ -533,7 +548,7 @@ function updateScenarioLifecycle(symbol,frame,cs,currentBar=null){
    fresh.currentPrimaryTrend=primaryTrendLabel(frame.a);
    fresh.currentSetup=currentSetupLabel(frame.a);
 
-   if(bars.length>fresh.expiryBars&&isPreTriggerScenarioState(fresh.state)){
+   if(allBars.length>fresh.expiryBars&&isPreTriggerScenarioState(fresh.state)){
      fresh.state='EXPIRED';
      fresh.endReason='Entry condition did not trigger before expiry';
      return fresh;
@@ -551,15 +566,34 @@ function updateScenarioLifecycle(symbol,frame,cs,currentBar=null){
      return fresh;
    }
 
+   // Reference/watchlist scenarios are observed but are never converted into a Paper Trigger
+   // until the same timeframe becomes execution-qualified on a CLOSED candle.
+   if(!fresh.executionArmed){
+     if(!qualifiedNow){
+       const longRef=fresh.side===1;
+       const observed=[...allBars].reverse().find(b=>longRef?b.close>fresh.breakoutLevel:b.close<fresh.breakoutLevel);
+       if(observed){fresh.lastReferenceBreakoutObservedAt=observed.closeTime;fresh.lastReferenceBreakoutClose=observed.close;}
+       fresh.referenceOnly=true;
+       fresh.resumeState='PENDING_BREAKOUT';
+       fresh.state='PAUSED_VALIDATION';
+       fresh.endReason='Reference/watchlist only: execution gate is not currently qualified';
+       return fresh;
+     }
+     // Promotion is prospective: do not retro-trigger from a breakout that happened before qualification.
+     fresh.executionArmed=true;fresh.referenceOnly=false;fresh.armedAt=Date.now();fresh.armedBarCloseTime=frame.a.barCloseTime;
+     fresh.state='PENDING_BREAKOUT';fresh.resumeState='PENDING_BREAKOUT';
+     bars=barsAfter(cs,fresh.armedBarCloseTime);
+   }
+
    // Once triggered, do not pause an existing paper execution because the setup later becomes neutral.
    const alreadyTriggered=['TRIGGERED','TP1_HIT','READY_NEXT_OPEN'].includes(fresh.state);
 
    if(!alreadyTriggered){
-     // A previously-qualified pending scenario is frozen if validation deteriorates materially.
-     // Near-qualified reference scenarios may continue to be observed for research, but cannot be mistaken for a qualified trigger.
-     if(frame.decision?.status==='BLOCKED'&&!frame.near){
+     // Pending execution-qualified scenarios pause whenever execution validation is no longer Confirmed/High Confidence.
+     if(!qualifiedNow){
        if(fresh.state!=='PAUSED_VALIDATION')fresh.resumeState=['PENDING_BREAKOUT','WAITING_RETEST'].includes(fresh.state)?fresh.state:(fresh.resumeState||'PENDING_BREAKOUT');
        fresh.state='PAUSED_VALIDATION';
+       fresh.endReason='Historical/execution gate is no longer qualified';
        return fresh;
      }else if(fresh.state==='PAUSED_VALIDATION'){
        fresh.state=fresh.resumeState||'PENDING_BREAKOUT';
@@ -748,6 +782,7 @@ function lifecycleCard(symbol,frame){
  ${Number.isFinite(s.adaptiveBreakoutQuality)?`<b>Breakout quality at confirmation:</b> ${fmt(s.adaptiveBreakoutQuality,1)}/100 • <b>V2 decision:</b> ${esc(s.adaptiveBreakoutDecision||'N/A')}<br>`:''}
  <b>Why this model:</b> ${esc(s.adaptiveBreakoutReason||s.entryReason||'Adaptive Entry V2')}</div>
 
+ ${Number.isFinite(s.lastReferenceBreakoutObservedAt)?`<div class="revalidationWarn"><b>REFERENCE BREAKOUT OBSERVED</b><br>تم رصد إغلاق مرجعي بعد مستوى السيناريو عند ${fmt(s.lastReferenceBreakoutClose,6)}، لكن Execution Validation لم تكن مؤهلة؛ لذلك لم يُنشأ Paper Trigger.</div>`:''}
  ${driftATR>=1?`<div class="revalidationWarn"><b>REVALIDATION REQUIRED</b><br>المستوى الحالي ابتعد عن مستوى السيناريو الأصلي بمقدار ${fmt(driftATR,2)} ATR. لا يتم تغيير المستوى القديم بصمت؛ يبقى محفوظًا للمقارنة.</div>`:''}
 
  <div class="nextAction"><b>Next action / الحالة المطلوبة:</b><br>${esc(scenarioNextAction(s))}</div>
@@ -1062,7 +1097,7 @@ function renderResearchResult(symbol,tf,costBps,result,historyN){
 async function runHistoricalResearch(){
  const b=$('runResearchBtn');b.disabled=true;
  const symbol=$('researchSymbol').value.trim().toUpperCase(),market=$('researchMarket').value,tf=$('researchTf').value,costBps=+$('researchCostBps').value;
- if(tf==='D1'){ $('researchStatus').textContent='D1 Research معطّل في V5.6.7.7 حتى يتوفر مسار بيانات أعمق مناسب للمتصفح.';b.disabled=false;return; }
+ if(tf==='D1'){ $('researchStatus').textContent='D1 Research معطّل في V5.6.7.8 حتى يتوفر مسار بيانات أعمق مناسب للمتصفح.';b.disabled=false;return; }
  $('researchStatus').textContent='جاري جلب تاريخ MTF متداخل فعليًا...';
  try{
    const needs=tf==='H1'
@@ -1080,14 +1115,14 @@ async function runHistoricalResearch(){
    const result=buildHistoricalResearch(sets,tf,costBps);
    if(!result.records.length)throw new Error('لم يتم العثور على إشارات كاملة بعد تطبيق MTF + Higher‑TF veto.');
    renderResearchResult(symbol,tf,costBps,result,sets[tf].length);
-   $('researchStatus').textContent=`اكتمل V5.6.7.7 — ${result.records.length} إشارة بعد MTF parity + veto.`;
+   $('researchStatus').textContent=`اكتمل V5.6.7.8 — ${result.records.length} إشارة بعد MTF parity + veto.`;
  }catch(e){$('researchStatus').textContent='خطأ في Historical Simulator: '+e.message;}
  finally{b.disabled=false;}
 }
 
 
-$('runLiveBtn').onclick=async()=>{
- const b=$('runLiveBtn');b.disabled=true;$('status').textContent='جاري جلب البيانات وتشغيل Unified Decision Engine...';
+async function runLiveAnalysis(source='manual'){
+ const b=$('runLiveBtn');if(b.disabled&&source==='watch')return false;b.disabled=true;$('status').textContent=source==='watch'?'Research Watch: تحديث آلي بعد إغلاق شمعة...':'جاري جلب البيانات وتشغيل Unified Decision Engine...';
  try{
    const symbol=$('liveSymbol').value.trim().toUpperCase(),market=$('liveMarket').value;
    const cfg={sampleRule:$('liveSampleRule').value,minSample:+$('liveMinSample').value,minAcc:+$('liveMinAcc').value,minPF:+$('liveMinPF').value,minWilson:+$('liveMinWilson').value,costBps:+$('liveCostBps').value};
@@ -1128,12 +1163,14 @@ $('runLiveBtn').onclick=async()=>{
    currentLive={symbol,market,ctx,frames,tactical,setsByTf,agreement:netConsensus,netConsensus,directionalCount,bullCount:bull,bearCount:bear,neutralCount:neutral,majorityCount,majorityDirection,strength,cfg};
    // UI helper self-check: fail with a precise message instead of a blank dashboard.
    if(typeof metric!=='function'||typeof statusClass!=='function'||typeof displayPF!=='function')throw new Error('UI helper initialization failed: metric/statusClass/displayPF');
-   currentTf='H1';renderLive();
-   $('status').textContent='اكتمل V5.6.7.7: Strategic MTF + parallel Tactical M15 + dedicated tactical validation + live integrity.';
+   if(source==='manual'||!['M15','H1','D1'].includes(currentTf))currentTf='H1';renderLive();
+   $('status').textContent='اكتمل V5.6.7.8: Strategic MTF + parallel Tactical M15 + dedicated tactical validation + live integrity.';
    if(researchWatchTimer&&['TACTICAL QUALIFIED','STRONG TACTICAL RESEARCH'].includes(tactical.decision.status)){const side=tactical.assessment.side===1?'Bullish':'Bearish';sendResearchNotice('Tactical M15 Paper Research',`${symbol} M15: ${side} • ${tactical.decision.status} • quality ${tactical.assessment.quality.toFixed(1)}`,`tactical-qualified:${symbol}:${finals.M15.barCloseTime}:${tactical.assessment.side}`);}
- }catch(e){$('status').textContent='خطأ: '+e.message;}
+   return true;
+ }catch(e){$('status').textContent='خطأ: '+e.message;return false;}
  finally{b.disabled=false;}
-};
+}
+$('runLiveBtn').onclick=()=>runLiveAnalysis('manual');
 
 function metric(label,value,cls=''){return`<div class="metric"><small>${label}</small><b class="${cls}">${value}</b></div>`;}
 function statusClass(s){return s==='BLOCKED'?'statusBlocked':s==='WATCHLIST'?'statusWatch':s==='PRELIMINARY'?'statusPrelim':s==='CONFIRMED'?'statusConfirmed':'statusHigh';}
@@ -1236,7 +1273,7 @@ function renderTf(){
    </div>
    <div class="foldGrid">${e.folds.map(z=>`<div class="foldBox"><small>Execution Fold ${z.fold}</small><b>${z.resolved>=10?('PF '+displayPF(z.pf,z.resolved)):'small N'}</b><small>N ${z.resolved} • Avg ${z.avgR.toFixed(3)}R</small></div>`).join('')}</div>
    <div class="edgeReadiness ${edge.cls}"><b>Edge Readiness:</b> ${esc(edge.label)}<br><small>${esc(edge.details)}</small></div>
-   <div class="overlapNote">Hard gate V5.6.7.7: execution PF ≥1.10 • AvgR ≥0.020R • Wilson ≥42% • 3 profitable eligible folds • median PF ≥1.05 • current regime must be ALLOW. Under-sampled/developing regimes become WATCHLIST, not Confirmed.</div>`:'<div class="hiddenLevels">لا يوجد اتجاه فني صالح لتشغيل Execution Validation.</div>'}`;
+   <div class="overlapNote">Hard gate V5.6.7.8: execution PF ≥1.10 • AvgR ≥0.020R • Wilson ≥42% • 3 profitable eligible folds • median PF ≥1.05 • current regime must be ALLOW. Under-sampled/developing regimes become WATCHLIST, not Confirmed.</div>`:'<div class="hiddenLevels">لا يوجد اتجاه فني صالح لتشغيل Execution Validation.</div>'}`;
 
  const flags=f.integrity.flags?.length?f.integrity.flags.map(x=>`<span class="integrityFlag">${esc(x)}</span>`).join(''):'<span class="integrityOk">No major live integrity flag</span>';
  $('tfIntegrity').innerHTML=`<h2>4 — Market Integrity Engine</h2>
@@ -1281,58 +1318,105 @@ function renderTf(){
 }
 
 
-let researchWatchTimer=null,watchOpenTimes={},watchAlertKeys=new Set();
-function watchEnabled(){return localStorage.getItem('trend_research_watch_v5677')==='1';}
-function updateWatchUi(){const b=$('toggleWatchBtn'),st=$('watchState');if(!b||!st)return;const on=!!researchWatchTimer;st.textContent=on?'ON • PAPER RESEARCH':'OFF';st.className=on?'watchOn':'watchOff';b.textContent=on?'إيقاف Research Watch':'تشغيل Research Watch';}
-function sendResearchNotice(title,body,key){
- if(watchAlertKeys.has(key))return;watchAlertKeys.add(key);
- try{if('Notification'in window&&Notification.permission==='granted')new Notification(title,{body,icon:'icon-192.png'});}catch{}
- const st=$('status');if(st)st.textContent=`Research Watch: ${body}`;
+let researchWatchTimer=null,watchClosedTimes={},watchAlertKeys=new Set(),watchPollBusy=false,watchLastPoll=0,watchLastEvent='—';
+const WATCH_KEY='trend_research_watch_v5678';
+function watchEnabled(){
+ const v=localStorage.getItem(WATCH_KEY);if(v!=null)return v==='1';
+ const old=localStorage.getItem('trend_research_watch_v5677');if(old==='1'){localStorage.setItem(WATCH_KEY,'1');return true;}return false;
 }
-async function researchWatchPoll(){
- if(!currentLive)return;
- const intervalMap={M15:'15m',H1:'1h',D1:'1d'};
- const frames=currentLive.frames.filter(f=>f.a.side&&['WATCHLIST','PRELIMINARY','CONFIRMED','HIGH CONFIDENCE'].includes(f.decision.status));
- for(const f of frames){
-   try{
-     const bar=await fetchCurrentKline(currentLive.symbol,intervalMap[f.tf],currentLive.market);if(!bar)continue;
-     if(watchOpenTimes[f.tf]==null)watchOpenTimes[f.tf]=bar.time;
-     else if(bar.time!==watchOpenTimes[f.tf]){
-       watchOpenTimes[f.tf]=bar.time;
-       sendResearchNotice('New closed candle',`${currentLive.symbol} ${f.tf}: شمعة جديدة أغلقت؛ سيتم تحديث التحليل البحثي.`,`newbar:${currentLive.symbol}:${f.tf}:${bar.time}`);
-       setTimeout(()=>$('runLiveBtn')?.click(),250);
-     }
-     const L=f.levels;if(!L||!Number.isFinite(bar.close))continue;
-     const px=bar.close,atrv=Math.max(f.a.atr||0,Math.abs(px)*.001,1e-12),dist=Math.abs(px-L.entry)/atrv;
-     if(dist<=.25)sendResearchNotice('Paper level nearby',`${currentLive.symbol} ${f.tf}: السعر اقترب من Paper reference (${dist.toFixed(2)} ATR). راقب الإغلاق/التأكيد فقط.`,`near:${currentLive.symbol}:${f.tf}:${Math.floor(bar.time/60000)}:${Math.round(L.entry/atrv)}`);
-     if(Number.isFinite(L.retestLow)&&Number.isFinite(L.retestHigh)&&px>=Math.min(L.retestLow,L.retestHigh)&&px<=Math.max(L.retestLow,L.retestHigh))
-       sendResearchNotice('Retest zone watch',`${currentLive.symbol} ${f.tf}: السعر داخل Retest zone. يلزم تأكيد شمعة مغلقة قبل تغيير الحالة البحثية.`,`retest:${currentLive.symbol}:${f.tf}:${bar.time}`);
-     if(Number.isFinite(L.breakoutLevel)){
-       const crossed=f.a.side===1?px>=L.breakoutLevel:px<=L.breakoutLevel;
-       if(crossed)sendResearchNotice('Breakout watch',`${currentLive.symbol} ${f.tf}: السعر تجاوز مستوى الاختراق داخل الشمعة؛ Wick وحده لا يكفي، انتظار الإغلاق.`,`break:${currentLive.symbol}:${f.tf}:${bar.time}`);
-     }
-   }catch{}
+function updateWatchUi(){
+ const b=$('toggleWatchBtn'),st=$('watchState'),diag=$('watchDiag');if(!b||!st)return;
+ const on=!!researchWatchTimer;st.textContent=on?'ON • CLOSED-CANDLE WATCH':'OFF';st.className=on?'watchOn':'watchOff';b.textContent=on?'إيقاف Research Watch':'تشغيل Research Watch';
+ if(diag){
+   const perm=('Notification'in window)?Notification.permission:'unsupported';
+   const poll=watchLastPoll?new Date(watchLastPoll).toLocaleTimeString():'—';
+   const vis=document.visibilityState||'unknown';
+   diag.textContent=on?`Watch active • last poll ${poll} • notifications ${perm} • page ${vis} • ${watchLastEvent}`:'Watch diagnostics: stopped';
+   diag.className='watchDiag '+(on?(vis==='visible'?'good':'warn'):'');
  }
- // Tactical M15 can be active even when the strategic M15 frame is BLOCKED.
- const t=currentLive.tactical;
- if(t?.plan&&['WATCHLIST','TACTICAL QUALIFIED','STRONG TACTICAL RESEARCH'].includes(t.decision.status)){
-   try{
-     const bar=await fetchCurrentKline(currentLive.symbol,'15m',currentLive.market);
-     const px=bar.close,atrv=Math.max(t.plan.atrRef||0,Math.abs(px)*.001,1e-12),dist=Math.abs(px-t.plan.entry)/atrv;
-     if(dist<=.25)sendResearchNotice('Tactical Paper level nearby',`${currentLive.symbol} M15: السعر اقترب من Tactical Paper Entry (${dist.toFixed(2)} ATR).`, `tnear:${currentLive.symbol}:${bar.time}:${t.assessment.side}`);
-     if(watchOpenTimes.TACTICAL_M15==null)watchOpenTimes.TACTICAL_M15=bar.time;
-     else if(bar.time!==watchOpenTimes.TACTICAL_M15){watchOpenTimes.TACTICAL_M15=bar.time;setTimeout(()=>$('runLiveBtn')?.click(),300);}
-   }catch{}
+}
+function sendResearchNotice(title,body,key){
+ if(watchAlertKeys.has(key))return;watchAlertKeys.add(key);watchLastEvent=body;
+ try{if('Notification'in window&&Notification.permission==='granted')new Notification(title,{body,icon:'icon-192.png'});}catch{}
+ const st=$('status');if(st)st.textContent=`Research Watch: ${body}`;updateWatchUi();
+}
+function scenarioSnapshot(symbol){
+ const out={};for(const x of loadScenarios().filter(r=>r.symbol===symbol).slice(-60))out[x.id]={id:x.id,tf:x.tf,state:x.state,side:x.side};return out;
+}
+function notifyScenarioTransitions(before,after,symbol){
+ for(const [id,a] of Object.entries(after)){
+   const b=before[id];if(!b||b.state===a.state)continue;
+   const labels={WAITING_RETEST:'Breakout confirmed — waiting retest',READY_NEXT_OPEN:'Entry condition confirmed — next open',TRIGGERED:'Paper trigger recorded',TP1_HIT:'Paper TP1 observed',TP2_HIT:'Paper TP2 observed',STOPPED:'Paper stop observed',PAUSED_VALIDATION:'Validation paused',PAUSED_INTEGRITY:'Integrity pause',PAUSED_TECHNICAL:'Technical pause',STALE_REVALIDATION:'S/R revalidation required',INVALIDATED:'Scenario invalidated',EXPIRED:'Scenario expired'};
+   sendResearchNotice(labels[a.state]||'Paper lifecycle update',`${symbol} ${a.tf}: ${b.state} → ${a.state}.`, `state:${id}:${b.state}:${a.state}`);
  }
+}
+function scenarioCrossedOnClose(s,bar){
+ if(!s||!bar||!Number.isFinite(s.breakoutLevel)||!Number.isFinite(bar.close))return false;
+ return s.side===1?bar.close>s.breakoutLevel:bar.close<s.breakoutLevel;
+}
+async function researchWatchPoll(force=false){
+ if(watchPollBusy||!watchEnabled())return;
+ watchPollBusy=true;watchLastPoll=Date.now();
+ try{
+   if(!currentLive){await runLiveAnalysis('watch');}
+   if(!currentLive){watchLastEvent='No Live MTF context yet';return;}
+   const symbol=currentLive.symbol,market=currentLive.market,intervalMap={M15:'15m',H1:'1h',D1:'1d'};
+   const recentByTf={},closeEvents=[];
+   for(const [tf,interval] of Object.entries(intervalMap)){
+     try{
+       const rows=await fetchRecentKlines(symbol,interval,market,4);recentByTf[tf]=rows;
+       const closed=latestClosedBar(rows);if(!closed)continue;
+       if(watchClosedTimes[tf]==null){watchClosedTimes[tf]=closed.closeTime;continue;}
+       if(closed.closeTime>watchClosedTimes[tf]){
+         watchClosedTimes[tf]=closed.closeTime;closeEvents.push({tf,bar:closed});
+         sendResearchNotice('Closed candle detected',`${symbol} ${tf}: أغلقت شمعة جديدة عند ${fmt(closed.close,6)}؛ يجري تحديث التحليل المغلق.`,`closed:${symbol}:${tf}:${closed.closeTime}`);
+       }
+     }catch(e){watchLastEvent=`${tf} watch fetch failed: ${e.message}`;}
+   }
+
+   // M15 may provide an EARLY observation of an H1 level, but it must never advance the H1 state.
+   const m15Event=closeEvents.find(x=>x.tf==='M15');
+   if(m15Event){
+     for(const sc of loadScenarios().filter(x=>x.symbol===symbol&&x.tf==='H1'&&!isTerminalScenarioState(x.state))){
+       if(scenarioCrossedOnClose(sc,m15Event.bar)){
+         const dir=sc.side===1?'فوق':'أسفل';
+         sendResearchNotice('Early M15 confirmation only',`${symbol}: أغلقت M15 ${dir} مستوى H1 ${fmt(sc.breakoutLevel,6)}. هذه ملاحظة مبكرة فقط؛ حالة H1 لا تتغير قبل إغلاق H1.`,`earlym15:${sc.id}:${m15Event.bar.closeTime}`);
+       }
+     }
+   }
+
+   if(closeEvents.length||force){
+     const before=scenarioSnapshot(symbol);
+     const ok=await runLiveAnalysis('watch');
+     if(ok){const after=scenarioSnapshot(symbol);notifyScenarioTransitions(before,after,symbol);}
+   }
+
+   // Intrabar proximity is informational only. State transitions remain closed-candle driven.
+   for(const f of currentLive.frames||[]){
+     const sc=activeScenarioFor(symbol,f.tf);if(!sc)continue;
+     const rows=recentByTf[f.tf]||[];const live=rows.at(-1);if(!live||!live.isOpen)continue;
+     const px=live.close,atrv=Math.max(f.a.atr||0,Math.abs(px)*.001,1e-12);
+     if(Number.isFinite(sc.entry)){
+       const dist=Math.abs(px-sc.entry)/atrv;
+       if(dist<=.20)sendResearchNotice('Paper reference nearby',`${symbol} ${f.tf}: السعر الحي قريب من المرجع (${dist.toFixed(2)} ATR). لا تغيير للحالة حتى إغلاق الشمعة.`,`near:${sc.id}:${Math.floor(live.time/60000)}`);
+     }
+     if(scenarioCrossedOnClose(sc,live))sendResearchNotice('Intrabar level crossed',`${symbol} ${f.tf}: المستوى تم تجاوزه داخل الشمعة المفتوحة؛ الانتظار للإغلاق إلزامي.`,`intrabar:${sc.id}:${live.time}`);
+   }
+   if(!closeEvents.length&&watchLastEvent==='—')watchLastEvent='Monitoring closed candles';
+ }catch(e){watchLastEvent=`Watch error: ${e.message}`;const st=$('status');if(st)st.textContent='Research Watch error: '+e.message;}
+ finally{watchPollBusy=false;updateWatchUi();}
 }
 async function startResearchWatch(){
  if(researchWatchTimer)return;
  if('Notification'in window&&Notification.permission==='default'){try{await Notification.requestPermission();}catch{}}
- localStorage.setItem('trend_research_watch_v5677','1');watchOpenTimes={};watchAlertKeys.clear();
- researchWatchTimer=setInterval(researchWatchPoll,60000);updateWatchUi();researchWatchPoll();
+ localStorage.setItem(WATCH_KEY,'1');watchClosedTimes={};watchAlertKeys.clear();watchLastEvent='Initializing closed-candle watch';
+ researchWatchTimer=setInterval(()=>researchWatchPoll(false),15000);updateWatchUi();researchWatchPoll(true);
 }
-function stopResearchWatch(){if(researchWatchTimer){clearInterval(researchWatchTimer);researchWatchTimer=null;}localStorage.setItem('trend_research_watch_v5677','0');updateWatchUi();}
+function stopResearchWatch(){if(researchWatchTimer){clearInterval(researchWatchTimer);researchWatchTimer=null;}localStorage.setItem(WATCH_KEY,'0');watchPollBusy=false;watchLastEvent='Stopped';updateWatchUi();}
 if($('toggleWatchBtn'))$('toggleWatchBtn').onclick=()=>researchWatchTimer?stopResearchWatch():startResearchWatch();
+document.addEventListener('visibilitychange',()=>{updateWatchUi();if(!document.hidden&&watchEnabled())researchWatchPoll(true);});
+window.addEventListener('focus',()=>{if(watchEnabled())researchWatchPoll(true);});
+window.addEventListener('pageshow',()=>{if(watchEnabled())researchWatchPoll(true);});
 
 if($('runResearchBtn'))$('runResearchBtn').onclick=runHistoricalResearch;
 try{saveScenarios(loadScenarios().map(migrateScenarioText));}catch{}
