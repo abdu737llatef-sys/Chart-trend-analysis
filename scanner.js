@@ -39,7 +39,7 @@ const FALLBACK_LARGE=['BTC','ETH','BNB','XRP','SOL','DOGE','ADA','TRX','AVAX','L
 const leveragedRe=/(UP|DOWN|BULL|BEAR|3L|3S)$/i;
 
 if('serviceWorker' in navigator)window.addEventListener('load',async()=>{try{
-  const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.7',{updateViaCache:'none'});
+  const reg=await navigator.serviceWorker.register('./service-worker.js?v=5.6.7.8',{updateViaCache:'none'});
   await reg.update();
 }catch(e){console.warn(e);}});
 
@@ -565,7 +565,7 @@ function nearTable(rows){
  <tbody>${rows.slice(0,16).map(x=>`<tr><td class="coinCell">${esc(x.symbol)}</td><td>${x.side===1?'Bullish':'Bearish'}</td><td>${x.verified.toFixed(1)}</td><td class="${integrityClass(x.integrity.score)}">${x.integrity.score.toFixed(1)}</td><td>${(x.validation.acc*100).toFixed(1)}%</td><td>${displayPF(x.validation.pf)}</td><td>${x.execution?.available?displayPF(x.execution.stats.pf):'N/A'}</td><td>${esc(x.reason)}</td></tr>`).join('')}</tbody></table>`;
 }
 
-window.openFull=symbol=>{const m=$('scanMarket')?.value||'futures';location.href=`./?v=5.6.7.7&symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(m)}`;};
+window.openFull=symbol=>{const m=$('scanMarket')?.value||'futures';location.href=`./?v=5.6.7.8&symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(m)}`;};
 
 $('cancelScannerBtn').onclick=()=>{scannerCancelled=true;$('status').textContent='تم طلب الإيقاف؛ سيتوقف بعد انتهاء الطلبات الجارية.';};
 
@@ -654,7 +654,7 @@ $('runScannerBtn').onclick=async()=>{
    ['scannerSummary','bullishCard','bearishCard','closestGrid','integrityCard','nearMissCard'].forEach(id=>$(id).classList.remove('hidden'));
 
    const lowIntegrity=good.filter(x=>!x.integrity.pass).length,executionBlocked=good.filter(x=>x.side&&(!x.execution?.hardPass)).length;
-   $('scannerSummary').innerHTML=`<h2>V5.6.7.7 Unified Scanner Summary</h2><div class="metrics">
+   $('scannerSummary').innerHTML=`<h2>V5.6.7.8 Unified Scanner Summary</h2><div class="metrics">
      ${metric('Market-cap source',esc(u.source))}
      ${metric('Eligible universe',candidates.length)}
      ${metric('Deep-scanned',deep.length)}
@@ -675,7 +675,7 @@ $('runScannerBtn').onclick=async()=>{
    $('closestBearishTable').innerHTML=closestCards(near,-1,cfg);
    $('nearMissTable').innerHTML=nearTable(near);
 
-   $('status').textContent=`Stage 4/4 complete: ${bulls.length} Bullish و${bears.length} Bearish اجتازوا Directional + Execution + Integrity gates في V5.6.7.7.`;
+   $('status').textContent=`Stage 4/4 complete: ${bulls.length} Bullish و${bears.length} Bearish اجتازوا Directional + Execution + Integrity gates في V5.6.7.8.`;
  }catch(e){
    $('status').textContent=e.message==='Scan cancelled'?'تم إيقاف الفحص.':'خطأ أثناء الفحص: '+e.message;
  }finally{
