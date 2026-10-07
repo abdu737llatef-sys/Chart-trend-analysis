@@ -23,11 +23,12 @@ function separatedTouches(cs,level,tol,kind){
  }
  return n;
 }
+function wilsonLowerEff(wins,n,k){k=Math.max(1,k||1);return wilsonLower95(wins/k,n/k);}
 function wilsonLower95(wins,n){if(!n)return 0;const z=1.96,p=wins/n,z2=z*z,den=1+z2/n;return(p+z2/(2*n)-z*Math.sqrt((p*(1-p)+z2/(4*n))/n))/den;}
 
 function validationSpec(tf){
  if(tf==='M15')return{history:4000,minN:80,step:4,horizon:16,purge:16,folds:4};
- if(tf==='H1')return{history:4000,minN:50,step:3,horizon:12,purge:12,folds:4};
+ if(tf==='H1')return{history:8000,minN:50,step:3,horizon:12,purge:12,folds:4};
  return{history:2500,minN:30,step:1,horizon:8,purge:8,folds:4};
 }
 
@@ -211,7 +212,7 @@ function barrierOutcomeDetailed(cs,i,dir,atrv,h=12,costBps=10){
  const riskPct=atrv/Math.max(entry,1e-12),costPct=costBps/10000,costR=riskPct>0?costPct/riskPct:0;
  for(let j=i+1;j<=Math.min(cs.length-1,i+h);j++){
    const fav=dir===1?cs[j].high>=F:cs[j].low<=F,adv=dir===1?cs[j].low<=A:cs[j].high>=A;
-   if(fav&&adv)return{out:'amb',r:null};
+   if(fav&&adv)return{out:'loss',r:-(1+costR),amb:true};
    if(fav)return{out:'win',r:1-costR};
    if(adv)return{out:'loss',r:-(1+costR)};
  }
@@ -243,8 +244,8 @@ function purgedWalkForward(sets,tf,costBps=10){
  function side(dir){
    const r=testRows.filter(x=>x.dir===dir),wins=r.filter(x=>x.out==='win').length,losses=r.filter(x=>x.out==='loss').length,n=wins+losses;
    const gains=r.filter(x=>x.r>0).reduce((s,x)=>s+x.r,0),lossAbs=-r.filter(x=>x.r<0).reduce((s,x)=>s+x.r,0);
-   const acc=n?wins/n:0,pf=lossAbs>0?gains/lossAbs:(gains>0?Infinity:0),wilson=wilsonLower95(wins,n),avgR=n?r.reduce((s,x)=>s+x.r,0)/n:0;
-   return{n,wins,losses,acc,pf,wilson,avgR};
+   const ov=Math.max(1,Math.ceil(spec.horizon/spec.step)),acc=n?wins/n:0,pf=lossAbs>0?gains/lossAbs:(gains>0?Infinity:0),wilson=wilsonLowerEff(wins,n,ov),avgR=n?r.reduce((s,x)=>s+x.r,0)/n:0;
+   return{n,wins,losses,acc,pf,wilson,wilsonNominal:wilsonLower95(wins,n),nEff:n/ov,overlap:ov,avgR};
  }
  function foldSide(dir){
    return foldRanges.map(fold=>{const r=fold.filter(x=>x.dir===dir),n=r.length,w=r.filter(x=>x.out==='win').length;return{n,acc:n?w/n:0};});
@@ -379,7 +380,7 @@ function tacticalOutcome(cs,signalIndex,side,a,costBps=10,policy=TACTICAL_POLICY
   const costR=executionCostR(entry,risk,costBps),end=Math.min(cs.length-1,execIndex+policy.horizon);
   for(let j=execIndex;j<=end;j++){
     const b=cs[j],stopHit=side===1?b.low<=stop:b.high>=stop,tpHit=side===1?b.high>=tp1:b.low<=tp1;
-    if(stopHit&&tpHit)return{triggered:true,resolved:false,ambiguous:true,r:null,reason:'AMBIGUOUS',execIndex,exitIndex:j};
+    if(stopHit&&tpHit)return{triggered:true,resolved:true,ambiguous:true,r:-(1+costR),reason:'STOP',execIndex,exitIndex:j};
     if(stopHit)return{triggered:true,resolved:true,ambiguous:false,r:-(1+costR),reason:'STOP',execIndex,exitIndex:j};
     if(tpHit)return{triggered:true,resolved:true,ambiguous:false,r:policy.tp1R-costR,reason:'TP1',execIndex,exitIndex:j};
   }
@@ -483,7 +484,7 @@ function resolveExecutionTrade(cs,exec,side,costBps,holdBars){
  const costR=executionCostR(entry,risk,costBps),end=Math.min(cs.length-1,exec.execIndex+holdBars);
  for(let j=exec.execIndex;j<=end;j++){
    const b=cs[j],stopHit=long?b.low<=stop:b.high>=stop,tp1Hit=long?b.high>=tp1:b.low<=tp1;
-   if(stopHit&&tp1Hit)return{triggered:true,resolved:false,ambiguous:true,outcome:'AMBIGUOUS',r:null,exitIndex:j};
+   if(stopHit&&tp1Hit)return{triggered:true,resolved:true,ambiguous:true,outcome:'STOP',r:-(1+costR),exitIndex:j};
    if(stopHit)return{triggered:true,resolved:true,ambiguous:false,outcome:'STOP',r:-(1+costR),exitIndex:j};
    if(tp1Hit)return{triggered:true,resolved:true,ambiguous:false,outcome:'TP1',r:1.20-costR,exitIndex:j};
  }
@@ -529,6 +530,12 @@ function simulateAdaptiveExecution(cs,sample,tf,costBps){
  const result=resolveExecutionTrade(cs,{execIndex,...eff},side,costBps,hold);
  return{signalIndex:i,fold:sample.fold,side,regime:executionRegimeBucket(a),adaptiveDecision,adaptiveMeta,breakoutIndex,retestIndex,confirmIndex,execIndex,...result};
 }
+function concurrencyFactor(res){
+ const iv=res.filter(x=>Number.isFinite(x.execIndex)&&Number.isFinite(x.exitIndex));
+ if(iv.length<2)return 1;
+ let tot=0;for(const a of iv){let c=0;for(const b of iv)if(b.execIndex<=a.exitIndex&&b.exitIndex>=a.execIndex)c++;tot+=c;}
+ return Math.max(1,tot/iv.length);
+}
 function aggregateExecution(rows){
  const triggered=rows.filter(x=>x.triggered),resolved=triggered.filter(x=>x.resolved&&Number.isFinite(x.r)),wins=resolved.filter(x=>x.r>0),losses=resolved.filter(x=>x.r<0);
  const grossWin=wins.reduce((s,x)=>s+x.r,0),grossLoss=Math.abs(losses.reduce((s,x)=>s+x.r,0)),pf=grossLoss?grossWin/grossLoss:(grossWin?Infinity:0);
@@ -538,7 +545,7 @@ function aggregateExecution(rows){
    signals:rows.length,triggered:triggered.length,triggerRate:rows.length?triggered.length/rows.length:0,resolved:resolved.length,
    wins:wins.length,losses:losses.length,accuracy:resolved.length?wins.length/resolved.length:0,pf,
    avgR:resolved.length?resolved.reduce((s,x)=>s+x.r,0)/resolved.length:0,
-   wilson:wilsonLower95(wins.length,resolved.length),maxDD,
+   wilson:wilsonLowerEff(wins.length,resolved.length,concurrencyFactor(resolved)),wilsonNominal:wilsonLower95(wins.length,resolved.length),overlap:concurrencyFactor(resolved),maxDD,
    ambiguous:triggered.filter(x=>x.ambiguous).length
  };
 }
@@ -575,10 +582,12 @@ function executionValidation(sets,tf,costBps=10,pwf=null,side=null,currentA=null
  const currentRegime=currentA?executionRegimeBucket({...currentA,side}):null;
  const regimeStats=currentRegime?aggregateExecution(rows.filter(x=>x.regime===currentRegime)):empty;
  const regimeMinN=tf==='M15'?30:tf==='H1'?25:20;
- let regimeState='INSUFFICIENT_SAMPLE',regimePass=false;
- if(regimeStats.resolved>=regimeMinN){
-   if(regimeStats.pf>=1.10&&regimeStats.avgR>=.02&&regimeStats.wilson>=.40){regimeState='ALLOW';regimePass=true;}
-   else if(regimeStats.pf<.95||regimeStats.avgR<=0)regimeState='SKIP_SETUP';
+ let regimeState='INSUFFICIENT_SAMPLE',regimePass=false,regimeBasis='BUCKET',regimeEval=regimeStats;
+ const fam=n=>String(n||'').startsWith('Trending')?'Trending':n==='Ranging'?'Ranging':'Mixed';
+ if(regimeEval.resolved<regimeMinN&&currentRegime){const fr=rows.filter(x=>fam(x.regime)===fam(currentRegime));const fs=aggregateExecution(fr);if(fs.resolved>=regimeMinN*2){regimeEval=fs;regimeBasis='FAMILY';}}
+ if(regimeEval.resolved>=(regimeBasis==='FAMILY'?regimeMinN*2:regimeMinN)){
+   if(regimeEval.pf>=1.10&&regimeEval.avgR>=.02&&regimeEval.wilson>=.40){regimeState='ALLOW';regimePass=true;}
+   else if(regimeEval.pf<.95||regimeEval.avgR<=0)regimeState='SKIP_SETUP';
    else regimeState='WAIT_DEVELOPING';
  }
  const hardBlockReasons=[];
@@ -600,18 +609,18 @@ function executionValidation(sets,tf,costBps=10,pwf=null,side=null,currentA=null
  if(hardPass&&stats.resolved>=200&&stats.pf>=1.20&&stats.avgR>=.05&&stats.wilson>=.50&&profitableFolds>=3&&medPF>=1.15&&regimeStats.resolved>=50&&regimeStats.pf>=1.15&&regimeStats.avgR>=.03)robustness='STRONG_RESEARCH_EDGE';
  return{
    available:true,pass,hardPass,robustness,reason:hardPass?'EXECUTION_GATE_PASS':'EXECUTION_GATE_FAIL',hardBlockReasons,
-   stats,folds,regimes,currentRegime,regimeStats,regimeState,regimePass,regimeCaution,regimeMinN,
+   stats,folds,regimes,currentRegime,regimeStats,regimeBasis,regimeEval,regimeState,regimePass,regimeCaution,regimeMinN,
    globalPass,foldPass,needN,eligibleFolds:eligibleFolds.length,profitableFolds,medianFoldPF:medPF,
    costBps,side,rows
  };
 }
 
 root.UnifiedDecisionEngine={
- version:'5.6.7.8',
+ version:'5.6.7.9',
  validationSpec,technicalCore,contextScore,finalizeOne,finalizeCurrent,higherTfVeto,
  historicalSnapshot,fullStartIndex,purgedWalkForward,validationMode,paperLevels,entryQualityV2,adaptiveBreakoutDecision,
  executionValidation,executionRegimeBucket,aggregateExecution,LIVE_POLICY,
  tacticalDecision,tacticalAssessment,tacticalPaperPlan,tacticalValidation,tacticalAggregate,TACTICAL_POLICY,
- wilsonLower95,atr,clamp,normBase
+ wilsonLower95,wilsonLowerEff,atr,clamp,normBase
 };
 })(typeof window!=='undefined'?window:globalThis);

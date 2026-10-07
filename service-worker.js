@@ -1,5 +1,6 @@
-const CACHE='trend-v5-6-7-8-20260925';
+const CACHE='trend-v5-6-7-9-20261006';
 const CORE=[
+ './','./index.html?v=5.6.7.8',
  './style.css?v=5.6.7.8',
  './decision-engine.js?v=5.6.7.8',
  './app.js?v=5.6.7.8',
